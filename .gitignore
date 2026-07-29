@@ -95,8 +95,15 @@ cypress/screenshots/
 *.sql.gz
 dump.sql
 
-# ==================== Application specific ====================
+# ==================== Application specific (敏感配置) ====================
+src/main/resources/application.yml
 src/main/resources/application.yml~
+src/main/resources/application-dev.yml
+src/main/resources/application-prod.yml
+src/main/resources/application-test.yml
+frontend/.env
+frontend/.env.prod
+frontend/.env.test
 frontend/.vscode/*
 frontend/!.vscode/settings.json
 frontend/!.vscode/extensions.json
