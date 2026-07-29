@@ -1,0 +1,107 @@
+# ==================== Java ====================
+*.class
+*.jar
+*.war
+*.nar
+*.ear
+*.zip
+*.tar.gz
+*.rar
+hs_err_pid*
+replay_pid*
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+# ==================== Maven ====================
+.mvn/wrapper/maven-wrapper.properties
+
+# ==================== Spring Boot ====================
+spring-shell.log
+
+# ==================== IDE ====================
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+*.sw?
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+.VSCodeCounter
+
+# ==================== Node.js / Frontend ====================
+node_modules/
+dist/
+dist-ssr/
+coverage/
+*.local
+.vite/
+.vite-ssg-dist/
+.vite-ssg-temp/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ==================== Env files ====================
+.env.local
+.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# ==================== OS ====================
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ==================== Build ====================
+build/
+.cache/
+*.tmp
+*.bak
+*.tmp
+
+# ==================== Lock files (前端用 pnpm) ====================
+package-lock.json
+yarn.lock
+frontend/package-lock.json
+frontend/yarn.lock
+
+# ==================== Auto-generated ====================
+frontend/src/typings/components.d.ts
+frontend/src/typings/auto-imports.d.ts
+frontend/public/languages/
+frontend/public/themes/
+
+# ==================== Cypress ====================
+cypress/videos/
+cypress/screenshots/
+
+# ==================== Database ====================
+*.sql.bak
+*.sql.gz
+dump.sql
+
+# ==================== Application specific ====================
+src/main/resources/application.yml~
+frontend/.vscode/*
+frontend/!.vscode/settings.json
+frontend/!.vscode/extensions.json
+frontend/!.vscode/launch.json
+
+# ==================== MinIO / Docker ====================
+minio-data/
+docker-data/
