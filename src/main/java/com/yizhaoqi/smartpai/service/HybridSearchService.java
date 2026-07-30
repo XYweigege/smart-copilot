@@ -109,9 +109,11 @@ public class HybridSearchService {
                                 .k(recallK)
                                 .numCandidates(recallK)
                         );
-                        // 必须命中关键词 + 权限过滤
+                        // 语义召回：KNN 负责召回，关键词匹配仅作为软信号（should），
+                        // 不要把关键词做成 must 硬过滤，否则改写/语义化提问会被全部过滤掉。
+                        // 权限过滤保持 .filter 不变。
                         s.query(q -> q.bool(b -> b
-                                .must(mst -> mst.match(m -> m.field("textContent").query(query)))
+                                .should(mst -> mst.match(m -> m.field("textContent").query(query)))
                                 .filter(f -> f.bool(bf -> bf
                                         // 条件1: 用户可访问自己的文档
                                         .should(s1 -> s1.term(t -> t.field("userId").value(userDbId)))

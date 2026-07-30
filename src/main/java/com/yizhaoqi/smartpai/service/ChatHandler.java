@@ -33,6 +33,9 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ChatHandler {
     
     private static final Logger logger = LoggerFactory.getLogger(ChatHandler.class);
+    // 响应流安全网：仅当流超过此时长（毫秒）仍未结束时才强制结束，避免会话挂起。
+    // 正常结束由 DeepSeekClient.streamResponse 的 onComplete 回调处理，不会提前截断答案/聊天记录。
+    private static final long RESPONSE_MAX_WAIT_MS = 120000;
     private final RedisTemplate<String, String> redisTemplate;
     private final HybridSearchService searchService;
     private final DeepSeekClient deepSeekClient;
@@ -131,7 +134,7 @@ public class ChatHandler {
             
             // 8. 调用 DeepSeek API 并处理流式响应
             logger.info("调用DeepSeek API生成回复");
-            deepSeekClient.streamResponse(userMessage, context, history, 
+            deepSeekClient.streamResponse(userMessage, context, history,
                 chunk -> {
                     // 累积响应内容
                     StringBuilder responseBuilder = responseBuilders.get(session.getId());
@@ -149,76 +152,40 @@ public class ChatHandler {
                     // 清理会话响应构建器
                     responseBuilders.remove(session.getId());
                     responseFutures.remove(session.getId());
+                },
+                () -> {
+                    // 流式响应正常结束：保存完整对话，不再依赖脆弱的“2秒无新增就结束”判断
+                    StringBuilder rb = responseBuilders.get(session.getId());
+                    if (rb != null) {
+                        completeResponse(rb, responseFuture, session, conversationId, userId, userMessage);
+                    }
                 });
             
-            // 7. 启动一个后台任务检查并标记响应完成
+            // 7. 安全网：仅在响应流长时间未结束时强制结束，避免会话挂起。
+            // 正常结束由 streamResponse 的 onComplete 回调处理，此处不会提前截断答案/聊天记录。
             new Thread(() -> {
                 try {
-                    // 等待最多30秒，给API足够的响应时间
-                    Thread.sleep(3000); // 先等待3秒钟，让API有时间开始响应
-                    
-                    // 获取当前累积的响应内容
-                    StringBuilder responseBuilder = responseBuilders.get(session.getId());
-                    
-                    // 如果响应构建器存在并且已有内容，认为响应已完成
-                    if (responseBuilder != null) {
-                        // 记录最后2秒的响应变化，检测是否停止增长
-                        String lastResponse = responseBuilder.toString();
-                        int lastLength = lastResponse.length();
-                        
-                        Thread.sleep(2000); // 再等待2秒
-                        
-                        // 再次检查是否有新内容
-                        if (responseBuilder.length() == lastLength) {
-                            // 没有新内容，可以认为响应已完成
-                            completeResponse(responseBuilder, responseFuture, session, 
-                                conversationId, userId, userMessage);
-                        } else {
-                            // 仍有新内容，继续等待
-                            logger.debug("响应仍在继续，等待完成...");
-                            // 再等待最多25秒
-                            for (int i = 0; i < 5; i++) {
-                                Thread.sleep(5000);
-                                if (responseBuilder != null) {
-                                    lastLength = responseBuilder.length();
-                                    // 再次检查2秒内是否有新内容
-                                    Thread.sleep(2000);
-                                    if (responseBuilder.length() == lastLength) {
-                                        // 没有新内容，可以认为响应已完成
-                                        completeResponse(responseBuilder, responseFuture, session,
-                                            conversationId, userId, userMessage);
-                                        return;
-                                    }
-                                }
-                            }
-                            
-                            // 如果经过多次检查仍未完成，强制完成
-                            if (!responseFuture.isDone()) {
-                                responseFuture.complete(responseBuilder.toString());
-                                
-                                // 发送响应完成通知
-                                sendCompletionNotification(session);
-                                
-                                // 更新对话历史并存储记忆
-                                String completeResponse = responseBuilder.toString();
-                                onConversationComplete(conversationId, userId, userMessage, 
-                                    completeResponse, session.getId());
-                                
-                                logger.info("消息处理强制完成，用户ID: {}", userId);
-                            }
-                        }
-                    } else {
-                        logger.warn("响应构建器为空，可能出现了错误，会话ID: {}", session.getId());
-                        RuntimeException exception = new RuntimeException("响应构建器为空");
-                        responseFuture.completeExceptionally(exception);
-                        // 发送错误消息
-                        handleError(session, exception);
+                    long deadline = System.currentTimeMillis() + RESPONSE_MAX_WAIT_MS;
+                    while (!responseFuture.isDone() && System.currentTimeMillis() < deadline) {
+                        Thread.sleep(5000);
                     }
+                    if (!responseFuture.isDone()) {
+                        StringBuilder rb = responseBuilders.get(session.getId());
+                        if (rb != null) {
+                            logger.warn("响应流超过 {}ms 未结束，强制完成对话", RESPONSE_MAX_WAIT_MS);
+                            completeResponse(rb, responseFuture, session, conversationId, userId, userMessage);
+                        } else {
+                            logger.warn("响应构建器为空，可能出现了错误，会话ID: {}", session.getId());
+                            RuntimeException exception = new RuntimeException("响应构建器为空");
+                            responseFuture.completeExceptionally(exception);
+                            handleError(session, exception);
+                        }
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
                 } catch (Exception e) {
                     logger.error("检查响应完成时出错: {}", e.getMessage(), e);
                     responseFuture.completeExceptionally(e);
-                    
-                    // 清理会话响应构建器
                     responseBuilders.remove(session.getId());
                     responseFutures.remove(session.getId());
                 }
@@ -330,6 +297,13 @@ public class ChatHandler {
 
                 // 尝试获取父块内容（Parent Chunk 扩展）
                 String snippet = getParentChunkContent(fileMd5, chunkId, MAX_PARENT_CHUNK_LEN);
+
+                // 如果父块扩展失败或返回内容为空，使用 ES 检索结果中的原始文本作为降级方案
+                if (snippet == null || snippet.trim().isEmpty()) {
+                    snippet = truncateText(result.getTextContent(), MAX_PARENT_CHUNK_LEN);
+                    logger.info("父块扩展为空，降级使用ES检索原始内容: fileMd5={}, 内容长度={}",
+                            fileMd5, snippet.length());
+                }
 
                 // 格式：[1] (test1.txt | MD5:abc123def456) 文件内容...
                 context.append(String.format("[%d] (%s | MD5:%s) %s\n", i + 1, fileLabel, fileMd5, snippet));
@@ -445,6 +419,10 @@ public class ChatHandler {
                                    String conversationId,
                                    String userId,
                                    String userMessage) {
+        // 防止 watcher 线程与流式完成回调重复触发，导致历史被存两次
+        if (responseFuture.isDone()) {
+            return;
+        }
         String completeResponse = responseBuilder.toString();
         responseFuture.complete(completeResponse);
         logger.info("DeepSeek响应已完成，长度: {}", completeResponse.length());

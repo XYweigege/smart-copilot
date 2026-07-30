@@ -49,11 +49,13 @@ public class IntentRecognitionService {
     );
 
     // 操作指令模式
+    // 注意：正则必须足够严格，避免将知识问答中提及"文档/上传"等关键词的句子误判为操作指令
+    // 例如 "参考我上传的文档" 是知识问答，不是文件操作
     private static final List<Pattern> OPERATION_PATTERNS = List.of(
-            // 文件操作
-            Pattern.compile("(上传|删除|查看|列表|搜索|查找).*(文件|文档)"),
-            Pattern.compile("(我的|所有|全部).*(文件|文档)"),
-            Pattern.compile("(文件|文档).*(列表|管理)"),
+            // 文件操作 — 仅匹配明确的命令式语句（句首动词 + 文件对象）
+            Pattern.compile("^(上传|删除|查看|列出|搜索|查找).{0,4}(文件|文档)$"),
+            Pattern.compile("^(帮我|请|可以).{0,6}(上传|删除|查看|列出|搜索|查找).{0,4}(文件|文档)"),
+            Pattern.compile("^(我的|所有|全部).{0,4}(文件|文档)(列表|管理)?$"),
             // 系统操作
             Pattern.compile("(设置|配置|修改|更改).*(密码|个人信息)"),
             Pattern.compile("(退出|登出|注销)"),

@@ -12,6 +12,16 @@ public interface DocumentVectorRepository extends JpaRepository<DocumentVector, 
     List<DocumentVector> findByFileMd5(String fileMd5); // 查询某文件的所有分块
 
     /**
+     * 查询指定文件的某个子切片
+     * 用于 Parent Chunk 上下文扩展：检索命中子切片后，回溯同一父块的其他子切片
+     *
+     * @param fileMd5 文件 MD5
+     * @param chunkId 子切片ID
+     * @return 该子切片
+     */
+    DocumentVector findByFileMd5AndChunkId(String fileMd5, Integer chunkId);
+
+    /**
      * 查询指定文件的某个父块下的所有子切片
      * 用于 Parent Chunk 上下文扩展：检索命中子切片后，回溯同一父块的其他子切片
      *

@@ -78,7 +78,7 @@ public class KnowledgeGraphService {
             logger.info("提取到 {} 个关键词: {}", keywords.size(), keywords);
 
             // 2. 在 Neo4j 中创建节点和关系
-            createDocumentAndKeywordsNodes(fileMd5, keywords, userId, orgTag);
+            createDocumentAndKeywordNodes(fileMd5, keywords, userId, orgTag);
 
             logger.info("知识图谱构建完成，fileMd5: {}", fileMd5);
         } catch (Exception e) {

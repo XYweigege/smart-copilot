@@ -1,43 +1,51 @@
 # PaiSmart - 企业级 AI 知识库管理系统
 
-派聪明（PaiSmart）是一个基于 RAG（检索增强生成）技术的企业级 AI 知识库管理系统，提供智能文档处理和检索能力。
+派聪明（PaiSmart）是一个基于 RAG（检索增强生成）技术的企业级 AI 知识库管理系统，提供智能文档处理、多路召回检索和 AI 问答能力。
 
 ## 核心特性
 
 - 📄 **多格式文档处理**：支持 PDF、Word、Excel、PPT、Markdown 等格式
-- 🔍 **智能检索**：基于 Elasticsearch 的混合检索（关键词 + 向量）
-- 🤖 **AI 问答**：集成大模型，基于知识库内容生成精准回答
+- 🔍 **多路召回检索**：ES 向量检索 + BM25 文本匹配 + Neo4j 知识图谱关系检索
+- 🎯 **Rerank 精排**：基于 gte-rerank-v2 模型对粗排结果二次排序，显著提升准确率
+- 🧠 **意图识别**：智能判断闲聊/知识问答/操作指令，避免无效检索
+- ✍️ **查询改写**：结合对话历史改写模糊查询，解决指代消解问题
+- 📊 **自适应检索**：根据查询复杂度动态调整检索数量
+- 📦 **Parent Chunk 上下文**：子切片检索 + 父块上下文扩展，兼顾精度与完整性
+- 💬 **对话摘要**：滑动窗口 + LLM 摘要策略，减少多轮对话 token 消耗
+- 🕸️ **知识图谱**：基于 Neo4j 构建 Document-Keyword 关系图谱，支持关系推理检索
+- 🤖 **AI 问答**：集成通义千问大模型，基于知识库内容生成精准回答
 - 👥 **多租户架构**：通过组织标签实现数据隔离与权限管理
-- ⚡ **实时对话**：基于 WebSocket 的流式响应
+- ⚡ **实时对话**：基于 WebSocket 的流式响应，支持引用溯源
 
 ## 技术栈
 
 ### 后端
 
-| 技术 | 版本 | 说明 |
-|------|------|------|
-| Java | 17 | 编程语言 |
-| Spring Boot | 3.4.2 | 应用框架 |
-| Spring Security + JWT | - | 安全认证 |
-| MySQL | 8.0 | 关系型数据库 |
-| Redis | 7.0+ | 缓存 |
-| Elasticsearch | 8.10+ | 搜索引擎 |
-| Kafka | 3.2+ | 消息队列 |
-| MinIO | - | 对象存储 |
-| Apache Tika | - | 文档解析 |
-| WebFlux | - | 响应式编程 |
+| 技术                  | 版本  | 说明           |
+| --------------------- | ----- | -------------- |
+| Java                  | 17    | 编程语言       |
+| Spring Boot           | 3.4.2 | 应用框架       |
+| Spring Security + JWT | -     | 安全认证       |
+| MySQL                 | 8.0   | 关系型数据库   |
+| Redis                 | 7.0+  | 缓存           |
+| Elasticsearch         | 8.10+ | 搜索引擎       |
+| Neo4j                 | 5.26+ | 知识图谱数据库 |
+| Kafka                 | 3.2+  | 消息队列       |
+| MinIO                 | -     | 对象存储       |
+| Apache Tika           | -     | 文档解析       |
+| WebFlux               | -     | 响应式编程     |
 
 ### 前端
 
-| 技术 | 版本 | 说明 |
-|------|------|------|
-| Vue | 3.5+ | UI 框架 |
-| TypeScript | 5.8+ | 类型系统 |
-| Vite | 6.x | 构建工具 |
-| Naive UI | 2.41+ | UI 组件库 |
-| Pinia | 3.x | 状态管理 |
-| UnoCSS | - | 原子化 CSS |
-| pnpm | 8.7+ | 包管理器 |
+| 技术       | 版本  | 说明       |
+| ---------- | ----- | ---------- |
+| Vue        | 3.5+  | UI 框架    |
+| TypeScript | 5.8+  | 类型系统   |
+| Vite       | 6.x   | 构建工具   |
+| Naive UI   | 2.41+ | UI 组件库  |
+| Pinia      | 3.x   | 状态管理   |
+| UnoCSS     | -     | 原子化 CSS |
+| pnpm       | 8.7+  | 包管理器   |
 
 ## 项目结构
 
@@ -46,16 +54,16 @@
 ```
 src/main/java/com/yizhaoqi/smartpai/
 ├── SmartPaiApplication.java      # 主应用程序入口
-├── client/                        # 外部API客户端
-├── config/                        # 配置类
-├── consumer/                      # Kafka消费者
+├── client/                        # 外部API客户端（DeepSeek、Embedding、Rerank）
+├── config/                        # 配置类（Security、Neo4j、Redis等）
+├── consumer/                      # Kafka消费者（文件处理、向量化）
 ├── controller/                    # REST API端点
 ├── entity/                        # 数据实体
 ├── exception/                     # 自定义异常
 ├── handler/                       # WebSocket处理器
 ├── model/                         # 领域模型
 ├── repository/                    # 数据访问层
-├── service/                       # 业务逻辑
+├── service/                       # 业务逻辑（RAG、知识图谱、意图识别等）
 └── utils/                         # 工具类
 ```
 
@@ -84,25 +92,36 @@ frontend/
 - Maven 3.8.6+
 - Node.js 18.20+
 - pnpm 8.7+
-- Docker (可选，用于启动基础设施服务)
+- Docker（用于启动基础设施服务）
 
 ### 1. 启动基础设施（Docker）
 
 ```bash
 cd docs
-docker compose -f docker-compose.yaml up -d
+docker compose up -d
 ```
+
+启动的服务：
+
+| 服务          | 端口        | 说明                     |
+| ------------- | ----------- | ------------------------ |
+| MySQL         | 3306        | 主数据库                 |
+| Redis         | 6379        | 缓存                     |
+| Kafka         | 9092        | 消息队列                 |
+| MinIO         | 19000/19001 | 对象存储（API/控制台）   |
+| Elasticsearch | 9200        | 向量检索                 |
+| Neo4j         | 7474/7687   | 知识图谱（Browser/Bolt） |
 
 ### 2. 配置 API Key
 
 编辑 `src/main/resources/application.yml`，配置 AI 服务的 API Key：
 
 ```yaml
-# 聊天服务 API
+# 聊天服务 API（阿里云百炼）
 deepseek:
   api:
     url: https://dashscope.aliyuncs.com/compatible-mode/v1
-    model: qwen-plus
+    model: qwen3.7-flash
     key: your-api-key
 
 # 向量化服务 API
@@ -111,12 +130,16 @@ embedding:
     url: https://dashscope.aliyuncs.com/compatible-mode/v1
     model: text-embedding-v4
     key: your-api-key
+
+# Rerank 精排
+rerank:
+  enabled: true
+  model: gte-rerank-v2
 ```
 
 ### 3. 启动后端
 
 ```bash
-cd 项目根目录
 mvn spring-boot:run
 ```
 
@@ -142,17 +165,41 @@ pnpm dev
 - 公开/私有文档权限控制
 - 组织级别文档隔离
 
-### AI 驱动的 RAG 实现
+### RAG 检索增强流程
 
-1. **文档解析**：使用 Apache Tika 解析上传的文档内容
-2. **智能分块**：将文档语义切分为合适的文本块
-3. **向量化**：调用 Embedding 模型为每个文本块生成高维向量
-4. **混合检索**：结合向量相似度与关键词匹配，检索相关文档
-5. **AI 生成**：将检索结果作为上下文，交给 LLM 生成回答
+```
+用户提问
+  ↓
+意图识别（闲聊/知识问答/操作指令）
+  ↓
+查询改写（结合对话历史，指代消解）
+  ↓
+自适应 topK（根据查询复杂度动态调整）
+  ↓
+多路召回：ES KNN + BM25 + Neo4j 图谱
+  ↓
+Rerank 精排（gte-rerank-v2）
+  ↓
+Parent Chunk 上下文扩展（子切片 → 父块）
+  ↓
+对话摘要压缩（滑动窗口 + LLM 摘要）
+  ↓
+LLM 流式生成（qwen3.7-flash）
+```
+
+### 知识图谱
+
+基于 Neo4j 构建 Document-Keyword 关系图谱：
+
+- 文件处理完成后自动提取关键词（HanLP）
+- 构建 Document → Keyword 关系
+- 检索时融合图谱结果，发现语义关联文档
+- 支持手动构建/删除/查询图谱
 
 ### 企业级多租户
 
 通过组织标签支持多租户架构：
+
 - 每个用户可创建或加入多个组织
 - 每个组织拥有独立的知识库和文档管理
 - 支持精细的权限控制，确保数据安全
@@ -160,15 +207,23 @@ pnpm dev
 ### 实时通信
 
 基于 WebSocket 实现：
+
 - 用户与 AI 的实时流式对话
 - 响应式聊天界面
 - 支持会话历史记录
+- 引用溯源（标注答案来源文档）
 
 ## 部署说明
 
 ### Docker 部署
 
-项目已提供完整的 `docker-compose.yaml` 配置文件，包含 MySQL、Redis、Kafka、MinIO、Elasticsearch 等基础设施。
+项目已提供完整的 `docker-compose.yaml` 配置文件，包含所有基础设施服务。
+
+访问各服务控制台：
+
+- MinIO Console: http://localhost:19001
+- Neo4j Browser: http://localhost:7474
+- Elasticsearch: http://localhost:9200
 
 ### 生产环境注意事项
 
@@ -196,14 +251,9 @@ pnpm dev
                            ↓
 ┌─────────────────────────────────────────────────────────┐
 │                    数据层 (Repository)                    │
-│  - JPA 数据访问  - Elasticsearch 操作  - MinIO 文件存储    │
+│  - JPA 数据访问  - Elasticsearch 操作  - Neo4j 图谱操作    │
+│  - MinIO 文件存储  - Redis 缓存                           │
 └─────────────────────────────────────────────────────────┘
-```
-
-### RAG 流程图
-
-```
-用户提问 → 问题向量化 → 混合检索(ES) → 重排序 → 构建Prompt → LLM生成 → 流式响应
 ```
 
 ## 常见问题
