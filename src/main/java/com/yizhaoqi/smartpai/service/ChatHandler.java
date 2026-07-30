@@ -39,6 +39,7 @@ public class ChatHandler {
     private final QueryRewriteService queryRewriteService;
     private final TopKStrategyService topKStrategyService;
     private final DocumentVectorRepository documentVectorRepository;
+    private final ConversationSummaryService conversationSummaryService;
     private final ObjectMapper objectMapper;
     
     // 用于存储每个会话的完整响应
@@ -57,13 +58,15 @@ public class ChatHandler {
                       DeepSeekClient deepSeekClient,
                       QueryRewriteService queryRewriteService,
                       TopKStrategyService topKStrategyService,
-                      DocumentVectorRepository documentVectorRepository) {
+                      DocumentVectorRepository documentVectorRepository,
+                      ConversationSummaryService conversationSummaryService) {
         this.redisTemplate = redisTemplate;
         this.searchService = searchService;
         this.deepSeekClient = deepSeekClient;
         this.queryRewriteService = queryRewriteService;
         this.topKStrategyService = topKStrategyService;
         this.documentVectorRepository = documentVectorRepository;
+        this.conversationSummaryService = conversationSummaryService;
         this.objectMapper = new ObjectMapper();
     }
 
@@ -84,11 +87,11 @@ public class ChatHandler {
             responseFutures.put(session.getId(), responseFuture);
             
             // 2. 获取对话历史
-            List<Map<String, String>> history = getConversationHistory(conversationId);
-            logger.debug("获取到 {} 条历史对话", history.size());
+            List<Map<String, String>> fullHistory = getConversationHistory(conversationId);
+            logger.debug("获取到 {} 条历史对话", fullHistory.size());
             
-            // 3. 查询改写：结合对话历史，将模糊查询改写为具体查询
-            String rewrittenQuery = queryRewriteService.rewrite(userMessage, history);
+            // 3. 查询改写：结合完整对话历史，将模糊查询改写为具体查询
+            String rewrittenQuery = queryRewriteService.rewrite(userMessage, fullHistory);
             logger.info("查询改写: '{}' -> '{}'", userMessage, rewrittenQuery);
             
             // 4. 计算自适应 topK
@@ -99,10 +102,14 @@ public class ChatHandler {
             List<SearchResult> searchResults = searchService.searchWithPermission(rewrittenQuery, userId, topK);
             logger.debug("搜索结果数量: {}", searchResults.size());
             
-            // 4. 构建上下文（RAG 检索结果）
+            // 6. 构建上下文（RAG 检索结果）
             String context = buildContext(searchResults, session.getId());
             
-            // 5. 调用 DeepSeek API 并处理流式响应
+            // 7. 对话摘要：将完整历史压缩为摘要+近期消息，减少 token 消耗
+            List<Map<String, String>> history = conversationSummaryService
+                    .getContextWithSummary(conversationId, fullHistory);
+            
+            // 8. 调用 DeepSeek API 并处理流式响应
             logger.info("调用DeepSeek API生成回复");
             deepSeekClient.streamResponse(userMessage, context, history, 
                 chunk -> {
@@ -264,9 +271,9 @@ public class ChatHandler {
         assistantMsgMap.put("timestamp", currentTimestamp);
         history.add(assistantMsgMap);
         
-        // 限制历史记录长度，保留最近的20条消息
-        if (history.size() > 20) {
-            history = history.subList(history.size() - 20, history.size());
+        // 限制历史记录长度，保留最近的30条消息（摘要服务会进一步压缩）
+        if (history.size() > 30) {
+            history = history.subList(history.size() - 30, history.size());
         }
         
         try {
