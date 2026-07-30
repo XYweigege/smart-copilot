@@ -53,7 +53,7 @@ services:
 
   kafka:
     image: bitnamilegacy/kafka:latest
-    container_name: kafka       # 如果需要按照新的命名规则，请改为 pai_smart_kafka
+    container_name: kafka # 如果需要按照新的命名规则，请改为 pai_smart_kafka
     restart: always
     ports:
       - "9092:9092"
@@ -147,10 +147,33 @@ services:
       /usr/local/bin/docker-entrypoint.sh
       "
     healthcheck:
-      test: [ 'CMD', 'curl', '-s', 'http://localhost:9200/_cluster/health?pretty' ]
+      test:
+        ["CMD", "curl", "-s", "http://localhost:9200/_cluster/health?pretty"]
       interval: 30s
       timeout: 10s
       retries: 3
+
+  # Neo4j - 知识图谱与实体关系存储
+  neo4j:
+    image: neo4j:5.26.4
+    container_name: neo4j
+    restart: always
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      - NEO4J_AUTH=neo4j/PaiSmart2025
+    volumes:
+      - neo4j-data:/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "neo4j-admin database check neo4j --verbose 2>&1 | grep -q 'Database name: neo4j'",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   redis-data:
@@ -158,3 +181,4 @@ volumes:
   minio-data:
   kafka-data:
   es-data:
+  neo4j-data:

@@ -371,7 +371,9 @@ public class UploadService {
             }
             String redisKey = "upload:" + userId + ":" + fileMd5;
             redisTemplate.opsForValue().setBit(redisKey, chunkIndex, true);
-            logger.debug("分片已标记为已上传 => fileMd5: {}, chunkIndex: {}, userId: {}", fileMd5, chunkIndex, userId);
+            // 设置7天过期时间，每次上传分片时刷新TTL
+            redisTemplate.expire(redisKey, 7, TimeUnit.DAYS);
+            logger.debug("分片已标记为已上传 => fileMd5: {}, chunkIndex: {}, userId: {}, TTL: 7天", fileMd5, chunkIndex, userId);
         } catch (Exception e) {
             logger.error("标记分片为已上传失败 => fileMd5: {}, chunkIndex: {}, userId: {}, 错误: {}", 
                       fileMd5, chunkIndex, userId, e.getMessage(), e);

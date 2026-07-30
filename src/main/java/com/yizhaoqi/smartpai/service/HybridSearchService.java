@@ -3,6 +3,7 @@ package com.yizhaoqi.smartpai.service;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import com.yizhaoqi.smartpai.client.EmbeddingClient;
+import com.yizhaoqi.smartpai.client.RerankClient;
 import com.yizhaoqi.smartpai.entity.EsDocument;
 import com.yizhaoqi.smartpai.entity.SearchResult;
 import com.yizhaoqi.smartpai.model.User;
@@ -13,6 +14,7 @@ import com.yizhaoqi.smartpai.model.FileUpload;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import co.elastic.clients.elasticsearch._types.query_dsl.Operator;
@@ -22,10 +24,12 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.Set;
 import java.util.Map;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.stream.Collectors;
 
 /**
- * 混合搜索服务，结合文本匹配和向量相似度搜索
+ * 混合搜索服务，结合文本匹配、向量相似度搜索和知识图谱关系检索
  * 支持权限过滤，确保用户只能搜索其有权限访问的文档
  */
 @Service
@@ -40,6 +44,9 @@ public class HybridSearchService {
     private EmbeddingClient embeddingClient;
 
     @Autowired
+    private RerankClient rerankClient;
+
+    @Autowired
     private UserService userService;
 
     @Autowired
@@ -50,6 +57,15 @@ public class HybridSearchService {
 
     @Autowired
     private FileUploadRepository fileUploadRepository;
+
+    @Autowired
+    private KnowledgeGraphService knowledgeGraphService;
+
+    @Value("${rerank.enabled:true}")
+    private boolean rerankEnabled;
+
+    @Value("${rerank.candidate-size:30}")
+    private int rerankCandidateSize;
 
     /**
      * 使用文本匹配和向量相似度进行混合搜索，支持权限过滤
@@ -85,8 +101,8 @@ public class HybridSearchService {
 
             SearchResponse<EsDocument> response = esClient.search(s -> {
                         s.index("knowledge_base");
-                        // KNN 召回
-                        int recallK = topK * 30; // KNN 召回窗口
+                        // KNN 召回：使用 rerankCandidateSize 作为召回窗口
+                        int recallK = rerankEnabled ? rerankCandidateSize : topK * 30;
                         s.knn(kn -> kn
                                 .field("vector")
                                 .queryVector(queryVector)
@@ -130,7 +146,7 @@ public class HybridSearchService {
                                         ))
                                 )
                         );
-                        s.size(topK);
+                        s.size(recallK);
                         return s;
                     }, EsDocument.class);
 
@@ -153,10 +169,24 @@ public class HybridSearchService {
                                 hit.source().isPublic()
                         );
                     })
-                    .toList();
+                    .collect(Collectors.toCollection(ArrayList::new));
 
             logger.debug("返回搜索结果数量: {}", results.size());
             attachFileNames(results);
+
+            // 第三阶段：Rerank 精排
+            if (rerankEnabled && results.size() > topK) {
+                logger.debug("开始 Rerank 精排，候选数: {}, topK: {}", results.size(), topK);
+                results = new ArrayList<>(rerankClient.rerank(query, results, topK));
+                logger.debug("Rerank 精排完成，结果数: {}", results.size());
+            } else if (results.size() > topK) {
+                // 未启用 rerank 时，直接截取 topK
+                results = results.subList(0, topK);
+            }
+
+            // 融合知识图谱关系检索结果
+            results = fuseGraphResults(results, query, userId, userEffectiveTags, topK);
+
             return results;
         } catch (Exception e) {
             logger.error("带权限的搜索失败", e);
@@ -448,6 +478,93 @@ public class HybridSearchService {
         } catch (Exception e) {
             logger.error("获取用户数据库ID失败: {}", e.getMessage(), e);
             throw new RuntimeException("获取用户数据库ID失败", e);
+        }
+    }
+
+    /**
+     * 融合知识图谱关系检索结果
+     * 将图谱检索结果与 ES 检索结果进行融合，对同时出现在两个结果集中的文档提升得分
+     *
+     * @param esResults ES 检索结果
+     * @param query 查询字符串
+     * @param userId 用户ID
+     * @param userEffectiveTags 用户有效组织标签
+     * @param topK 返回结果数量
+     * @return 融合后的搜索结果列表
+     */
+    private List<SearchResult> fuseGraphResults(List<SearchResult> esResults, String query, String userId,
+                                                 List<String> userEffectiveTags, int topK) {
+        try {
+            // 获取用户的主组织标签用于图谱检索
+            String primaryOrgTag = (userEffectiveTags != null && !userEffectiveTags.isEmpty())
+                    ? userEffectiveTags.get(0) : "";
+
+            // 从知识图谱中检索相关文档
+            List<Map<String, Object>> graphResults = knowledgeGraphService.searchByRelation(
+                    query, userId, primaryOrgTag, topK);
+
+            if (graphResults.isEmpty()) {
+                logger.debug("知识图谱未返回额外结果");
+                return esResults;
+            }
+
+            logger.debug("知识图谱返回 {} 个关系检索结果", graphResults.size());
+
+            // 构建 ES 结果的 fileMd5 -> SearchResult 映射
+            LinkedHashMap<String, SearchResult> mergedMap = new LinkedHashMap<>();
+            for (SearchResult sr : esResults) {
+                mergedMap.put(sr.getFileMd5(), sr);
+            }
+
+            // 融合图谱结果：对已存在的文档提升得分，对新文档补充结果
+            Set<String> esFileMd5s = new HashSet<>(mergedMap.keySet());
+            double maxEsScore = esResults.isEmpty() ? 1.0 :
+                    esResults.stream().mapToDouble(SearchResult::getScore).max().orElse(1.0);
+
+            for (Map<String, Object> graphDoc : graphResults) {
+                String fileMd5 = (String) graphDoc.get("fileMd5");
+                double graphScore = (double) graphDoc.get("score");
+                int matchedKeywords = (int) graphDoc.get("matchedKeywords");
+
+                if (esFileMd5s.contains(fileMd5)) {
+                    // 文档已在 ES 结果中，提升其得分（加权融合）
+                    SearchResult existing = mergedMap.get(fileMd5);
+                    double boostedScore = existing.getScore() + graphScore * 0.3;
+                    existing.setScore(boostedScore);
+                    logger.debug("图谱融合提升: fileMd5={}, ES得分={}, 图谱得分={}, 融合后={}",
+                            fileMd5, existing.getScore() - graphScore * 0.3, graphScore, boostedScore);
+                } else {
+                    // 文档不在 ES 结果中，作为补充结果添加
+                    // 使用图谱得分归一化后作为分数
+                    double normalizedScore = graphScore * maxEsScore * 0.5;
+                    SearchResult graphResult = new SearchResult(
+                            fileMd5,
+                            0,
+                            "[图谱关系检索] 匹配关键词: " + graphDoc.get("keywords"),
+                            normalizedScore,
+                            userId,
+                            primaryOrgTag,
+                            false
+                    );
+                    mergedMap.put(fileMd5, graphResult);
+                    logger.debug("图谱补充结果: fileMd5={}, 匹配关键词数={}, 得分={}",
+                            fileMd5, matchedKeywords, normalizedScore);
+                }
+            }
+
+            // 按得分降序排序并截取 topK
+            List<SearchResult> fusedResults = mergedMap.values().stream()
+                    .sorted((a, b) -> Double.compare(b.getScore(), a.getScore()))
+                    .limit(topK)
+                    .collect(Collectors.toCollection(ArrayList::new));
+
+            logger.info("图谱融合完成: ES结果数={}, 图谱结果数={}, 融合后数={}",
+                    esResults.size(), graphResults.size(), fusedResults.size());
+
+            return fusedResults;
+        } catch (Exception e) {
+            logger.warn("知识图谱融合失败，仅返回ES结果", e);
+            return esResults;
         }
     }
 

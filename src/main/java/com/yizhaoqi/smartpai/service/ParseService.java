@@ -126,6 +126,7 @@ public class ParseService {
         private final String orgTag;
         private final boolean isPublic;
         private int savedChunkCount = 0;
+        private int parentChunkCounter = 0;  // 父块计数器，用于生成 parentChunkId
 
         public StreamingContentHandler(String fileMd5, String userId, String orgTag, boolean isPublic) {
             super(-1); // 禁用Tika的内部写入限制，我们自己管理缓冲区
@@ -153,13 +154,14 @@ public class ParseService {
 
         private void processParentChunk() {
             String parentChunkText = buffer.toString();
-            logger.debug("处理父文本块，大小: {} bytes", parentChunkText.length());
+            parentChunkCounter++;  // 递增父块计数器
+            logger.debug("处理父文本块 #{}，大小: {} bytes", parentChunkCounter, parentChunkText.length());
 
             // 1. 将父块分割成更小的、有语义的子切片
             List<String> childChunks = ParseService.this.splitTextIntoChunksWithSemantics(parentChunkText, chunkSize);
 
-            // 2. 将子切片批量保存到数据库
-            this.savedChunkCount = ParseService.this.saveChildChunks(fileMd5, childChunks, userId, orgTag, isPublic, this.savedChunkCount);
+            // 2. 将子切片批量保存到数据库（传入 parentChunkId）
+            this.savedChunkCount = ParseService.this.saveChildChunks(fileMd5, childChunks, userId, orgTag, isPublic, this.savedChunkCount, parentChunkCounter);
 
             // 3. 清空缓冲区，为下一个父块做准备
             buffer.setLength(0);
@@ -175,23 +177,25 @@ public class ParseService {
      * @param orgTag          组织标签
      * @param isPublic        是否公开
      * @param startingChunkId 当前批次的起始分片ID
+     * @param parentChunkId   父块ID，标识这些子切片属于哪个父块
      * @return 保存后总的分片数量
      */
     private int saveChildChunks(String fileMd5, List<String> chunks,
-            String userId, String orgTag, boolean isPublic, int startingChunkId) {
+            String userId, String orgTag, boolean isPublic, int startingChunkId, int parentChunkId) {
         int currentChunkId = startingChunkId;
         for (String chunk : chunks) {
             currentChunkId++;
             var vector = new DocumentVector();
             vector.setFileMd5(fileMd5);
             vector.setChunkId(currentChunkId);
+            vector.setParentChunkId(parentChunkId);  // 设置父块ID
             vector.setTextContent(chunk);
             vector.setUserId(userId);
             vector.setOrgTag(orgTag);
             vector.setPublic(isPublic);
             documentVectorRepository.save(vector);
         }
-        logger.info("成功保存 {} 个子切片到数据库", chunks.size());
+        logger.info("成功保存 {} 个子切片到数据库（父块ID: {}）", chunks.size(), parentChunkId);
         return currentChunkId;
     }
 

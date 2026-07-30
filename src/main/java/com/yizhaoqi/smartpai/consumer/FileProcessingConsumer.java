@@ -2,6 +2,7 @@ package com.yizhaoqi.smartpai.consumer;
 
 import com.yizhaoqi.smartpai.config.KafkaConfig;
 import com.yizhaoqi.smartpai.model.FileProcessingTask;
+import com.yizhaoqi.smartpai.service.KnowledgeGraphService;
 import com.yizhaoqi.smartpai.service.ParseService;
 import com.yizhaoqi.smartpai.service.VectorizationService;
 import io.minio.MinioClient;
@@ -23,21 +24,23 @@ public class FileProcessingConsumer {
 
     private final ParseService parseService;
     private final VectorizationService vectorizationService;
+    private final KnowledgeGraphService knowledgeGraphService;
     @Autowired
     private KafkaConfig kafkaConfig;
 
 
-    public FileProcessingConsumer(ParseService parseService, VectorizationService vectorizationService) {
+    public FileProcessingConsumer(ParseService parseService, VectorizationService vectorizationService, KnowledgeGraphService knowledgeGraphService) {
         this.parseService = parseService;
         this.vectorizationService = vectorizationService;
+        this.knowledgeGraphService = knowledgeGraphService;
     }
 
     @KafkaListener(topics = "#{kafkaConfig.getFileProcessingTopic()}", groupId = "#{kafkaConfig.getFileProcessingGroupId()}")
     public void processTask(FileProcessingTask task) {
         log.info("Received task: {}", task);
-        log.info("文件权限信息: userId={}, orgTag={}, isPublic={}", 
+        log.info("文件权限信息: userId={}, orgTag={}, isPublic={}",
                 task.getUserId(), task.getOrgTag(), task.isPublic());
-                
+
         InputStream fileStream = null;
         try {
             // 下载文件
@@ -53,14 +56,19 @@ public class FileProcessingConsumer {
             }
 
             // 解析文件
-            parseService.parseAndSave(task.getFileMd5(), fileStream, 
+            parseService.parseAndSave(task.getFileMd5(), fileStream,
                     task.getUserId(), task.getOrgTag(), task.isPublic());
             log.info("文件解析完成，fileMd5: {}", task.getFileMd5());
 
             // 向量化处理
-            vectorizationService.vectorize(task.getFileMd5(), 
+            vectorizationService.vectorize(task.getFileMd5(),
                     task.getUserId(), task.getOrgTag(), task.isPublic());
             log.info("向量化完成，fileMd5: {}", task.getFileMd5());
+
+            // 构建知识图谱
+            knowledgeGraphService.buildGraphFromChunks(task.getFileMd5(),
+                    task.getUserId(), task.getOrgTag());
+            log.info("知识图谱构建完成，fileMd5: {}", task.getFileMd5());
         } catch (Exception e) {
             log.error("Error processing task: {}", task, e);
             // 抛出异常让 Kafka 的 DefaultErrorHandler 捕获并触发重试 / 死信

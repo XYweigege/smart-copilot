@@ -60,6 +60,63 @@ public class DeepSeekClient {
                     onError
                 );
     }
+
+    /**
+     * 同步调用 LLM，返回完整响应内容
+     * 用于查询改写等需要完整结果的场景
+     *
+     * @param systemPrompt 系统提示词
+     * @param userMessage 用户消息
+     * @return LLM 完整响应文本
+     */
+    public String syncCall(String systemPrompt, String userMessage) {
+        Map<String, Object> request = new java.util.HashMap<>();
+        request.put("model", model);
+        request.put("stream", false);
+        request.put("temperature", 0.3);
+        request.put("max_tokens", 512);
+
+        List<Map<String, String>> messages = new ArrayList<>();
+        messages.add(Map.of("role", "system", "content", systemPrompt));
+        messages.add(Map.of("role", "user", "content", userMessage));
+        request.put("messages", messages);
+
+        logger.debug("同步调用 LLM，systemPrompt 长度: {}, userMessage: {}", systemPrompt.length(), userMessage);
+
+        try {
+            String response = webClient.post()
+                    .uri("/chat/completions")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(request)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block(java.time.Duration.ofSeconds(10));
+
+            if (response == null) {
+                logger.warn("LLM 同步调用返回为空");
+                return userMessage;
+            }
+
+            ObjectMapper mapper = new ObjectMapper();
+            JsonNode node = mapper.readTree(response);
+            String content = node.path("choices")
+                    .path(0)
+                    .path("message")
+                    .path("content")
+                    .asText("");
+
+            if (content.isEmpty()) {
+                logger.warn("LLM 响应内容为空，返回原始查询");
+                return userMessage;
+            }
+
+            logger.debug("LLM 同步调用成功，响应: {}", content);
+            return content.trim();
+        } catch (Exception e) {
+            logger.error("LLM 同步调用失败: {}", e.getMessage(), e);
+            return userMessage; // 失败时返回原始查询
+        }
+    }
     
     private Map<String, Object> buildRequest(String userMessage, 
                                            String context,
