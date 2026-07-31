@@ -41,15 +41,15 @@ public class ConversationService {
     }
 
     /**
-     * 记录用户的对话历史（按 userId 落库，供 ChatHandler 调用）。
+     * 记录用户的对话历史（按 username 落库，供 ChatHandler 调用，带 conversationId）。
      *
-     * @param userId 用户 ID
+     * @param username 用户名
      * @param conversationId 会话 UUID（与 Redis 中的会话 ID 一致）
      * @param question 用户提问内容
      * @param answer 系统回答内容
      */
-    public void recordConversation(Long userId, String conversationId, String question, String answer) {
-        User user = userRepository.findById(userId)
+    public void recordConversationWithConversationId(String username, String conversationId, String question, String answer) {
+        User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new CustomException("User not found", HttpStatus.NOT_FOUND));
 
         Conversation conversation = new Conversation();

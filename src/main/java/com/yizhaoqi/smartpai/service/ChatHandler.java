@@ -716,9 +716,9 @@ public class ChatHandler {
         saveConversationToHistory(userId, conversationId);
 
         // 1.2 持久化到 MySQL（与 Redis 双写），即使 Redis 重启或过期也不丢失完整对话记录
+        // 注意：ChatHandler 中的 userId 实际是用户名（如 "admin"），不是 Long 类型的数字 ID
         try {
-            Long uid = Long.valueOf(userId);
-            conversationService.recordConversation(uid, conversationId, userMessage, aiResponse);
+            conversationService.recordConversationWithConversationId(userId, conversationId, userMessage, aiResponse);
         } catch (Exception e) {
             // MySQL 落库失败不影响 Redis 主流程，仅记录告警，避免阻塞对话
             logger.error("对话落库 MySQL 失败（Redis 已保存），用户: {}, 会话: {}, 原因: {}",
