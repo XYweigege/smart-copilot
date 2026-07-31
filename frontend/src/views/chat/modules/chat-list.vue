@@ -2,6 +2,7 @@
 import { NScrollbar } from 'naive-ui';
 import { VueMarkdownItProvider } from 'vue-markdown-shiki';
 import ChatMessage from './chat-message.vue';
+import { fetchConversationsByDate } from '@/service/api/chat';
 
 defineOptions({
   name: 'ChatList'
@@ -39,11 +40,8 @@ watchEffect(() => {
 
 async function getList() {
   loading.value = true;
-  const { error, data } = await request<Api.Chat.Message[]>({
-    url: 'users/conversation',
-    params: params.value
-  });
-  if (!error) {
+  const { error, data } = await fetchConversationsByDate(params.value.start_date, params.value.end_date);
+  if (!error && data) {
     list.value = data;
   }
   loading.value = false;

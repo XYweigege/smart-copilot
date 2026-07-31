@@ -181,13 +181,6 @@ declare namespace Api {
       conversationId: string;
     }
 
-    /** 历史消息列表接口返回：{ code, message, data: Message[] } */
-    interface ConversationsResponse {
-      code: number;
-      message: string;
-      data: Message[];
-    }
-
     interface Message {
       role: 'user' | 'assistant';
       content: string;

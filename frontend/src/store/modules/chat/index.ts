@@ -67,7 +67,7 @@ export const useChatStore = defineStore(SetupStoreId.Chat, () => {
 
   /**
    * 加载当前会话的历史消息（使用项目已有的 ConversationController 接口）
-   * 后端返回结构: { code, message, data: Api.Chat.Message[] }
+   * request 封装会自动解包，fetchConversations 返回的 data 已是消息数组 Message[]
    */
   async function loadConversations() {
     try {
@@ -76,10 +76,8 @@ export const useChatStore = defineStore(SetupStoreId.Chat, () => {
         console.error('加载历史消息失败:', error);
         return;
       }
-      const resp = data as Api.Chat.ConversationsResponse | undefined;
-      // 兼容 data 为数组或 { list: [...] } 两种结构
-      const raw = resp?.data;
-      historyMessages.value = Array.isArray(raw) ? raw : (raw as any)?.list ?? [];
+      // data 已是 Message[] 数组（request 已解包 response.data.data）
+      historyMessages.value = Array.isArray(data) ? data : [];
       console.log('加载历史消息成功，共', historyMessages.value.length, '条消息');
     } catch (error) {
       console.error('加载历史消息失败:', error);
