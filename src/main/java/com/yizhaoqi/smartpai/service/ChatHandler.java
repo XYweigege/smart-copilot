@@ -206,10 +206,8 @@ public class ChatHandler {
             if (historyJson != null && !historyJson.isEmpty()) {
                 saveConversationToHistory(userId, oldConversationId);
             }
-            // 删除旧会话的历史记录（释放 Redis 内存）
-            redisTemplate.delete(historyKey);
-            logger.info("删除用户 {} 的旧会话历史，conversationId={}", userId, oldConversationId);
-            
+            // 注意：保留旧会话历史记录，确保后续可以从会话列表切换回旧会话并读取完整消息
+
             // 删除旧的当前会话 key
             redisTemplate.delete(oldKey);
         }
@@ -260,7 +258,7 @@ public class ChatHandler {
                         messageCount = history.size() / 2; // 每条消息包含 user+assistant，所以除以2
                     }
                     
-                    meta.put("id", conversationId);
+                    meta.put("conversationId", conversationId);
                     meta.put("messageCount", messageCount);
                     result.add(meta);
                 } catch (JsonProcessingException e) {
@@ -281,18 +279,30 @@ public class ChatHandler {
      * @return 该会话的历史消息列表
      */
     public List<Map<String, String>> switchToConversation(String userId, String conversationId) {
-        // 1. 验证该会话是否属于该用户
+        // 0. 基础参数守卫，避免空指针导致 500
+        if (conversationId == null || conversationId.isEmpty()) {
+            throw new IllegalArgumentException("会话ID不能为空");
+        }
+
+        // 1. 验证该会话是否属于该用户（容错：只要在会话历史中有记录即视为有效）
         String listKey = "user:" + userId + ":conversation_list";
         Boolean isMember = redisTemplate.opsForZSet().score(listKey, conversationId) != null;
-        
+
         // 也检查是否是当前会话
         String currentKey = "user:" + userId + ":current_conversation";
         String currentConversationId = redisTemplate.opsForValue().get(currentKey);
-        
+
         if (!isMember && !conversationId.equals(currentConversationId)) {
-            throw new RuntimeException("会话不存在或不属于当前用户");
+            // 兜底：若该会话确实存在历史记录，允许切换（避免误判导致无法继续聊天）
+            String historyKey = "conversation:" + conversationId;
+            String historyJson = redisTemplate.opsForValue().get(historyKey);
+            if (historyJson == null || historyJson.isEmpty()) {
+                throw new RuntimeException("会话不存在或不属于当前用户");
+            }
+            // 自动将会话纳入历史列表，保证列表中可见
+            saveConversationToHistory(userId, conversationId);
         }
-        
+
         // 2. 如果切换的是非当前会话，先保存当前会话
         if (currentConversationId != null && !currentConversationId.equals(conversationId)) {
             String historyKey = "conversation:" + currentConversationId;
@@ -669,6 +679,9 @@ public class ChatHandler {
                                          String sessionId) {
         // 1. 更新 Redis 中的对话历史
         updateConversationHistory(conversationId, userMessage, aiResponse);
+
+        // 1.1 将本次会话纳入用户的历史会话列表，确保侧边栏能展示并支持继续聊天
+        saveConversationToHistory(userId, conversationId);
 
         // 2. 清理会话用户映射
         sessionUserMapping.remove(sessionId);
