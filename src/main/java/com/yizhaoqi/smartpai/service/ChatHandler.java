@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -186,6 +187,245 @@ public class ChatHandler {
         return conversationId;
     }
 
+    /**
+     * 新建会话 - 清除当前会话，创建全新的会话ID
+     * 用于减少 token 消耗，避免历史对话过长
+     *
+     * @param userId 用户ID
+     * @return 新的会话ID
+     */
+    public String createNewConversation(String userId) {
+        // 1. 获取旧会话ID（如果有）
+        String oldKey = "user:" + userId + ":current_conversation";
+        String oldConversationId = redisTemplate.opsForValue().get(oldKey);
+        
+        // 2. 保存旧会话到历史列表（如果存在且有消息）
+        if (oldConversationId != null) {
+            String historyKey = "conversation:" + oldConversationId;
+            String historyJson = redisTemplate.opsForValue().get(historyKey);
+            if (historyJson != null && !historyJson.isEmpty()) {
+                saveConversationToHistory(userId, oldConversationId);
+            }
+            // 删除旧会话的历史记录（释放 Redis 内存）
+            redisTemplate.delete(historyKey);
+            logger.info("删除用户 {} 的旧会话历史，conversationId={}", userId, oldConversationId);
+            
+            // 删除旧的当前会话 key
+            redisTemplate.delete(oldKey);
+        }
+        
+        // 3. 生成新会话ID
+        String newConversationId = UUID.randomUUID().toString();
+        
+        // 4. 存入 Redis
+        redisTemplate.opsForValue().set(oldKey, newConversationId, Duration.ofDays(7));
+        
+        // 5. 初始化新会话的元数据（标题为空，等第一条消息时更新）
+        initConversationMetadata(userId, newConversationId);
+        
+        logger.info("为用户 {} 创建全新会话ID: {} (旧会话: {})", userId, newConversationId, oldConversationId);
+        
+        return newConversationId;
+    }
+
+    /**
+     * 获取用户的历史会话列表
+     *
+     * @param userId 用户ID
+     * @return 会话列表，每个会话包含 id、title、createdAt、updatedAt、messageCount
+     */
+    public List<Map<String, Object>> getConversationHistoryList(String userId) {
+        String listKey = "user:" + userId + ":conversation_list";
+        Set<String> conversationIds = redisTemplate.opsForZSet().reverseRange(listKey, 0, 19); // 最近20个会话
+        
+        List<Map<String, Object>> result = new ArrayList<>();
+        if (conversationIds == null || conversationIds.isEmpty()) {
+            return result;
+        }
+        
+        for (String conversationId : conversationIds) {
+            String metaKey = "conversation_meta:" + conversationId;
+            String metaJson = redisTemplate.opsForValue().get(metaKey);
+            
+            if (metaJson != null) {
+                try {
+                    Map<String, Object> meta = objectMapper.readValue(metaJson, new TypeReference<Map<String, Object>>() {});
+                    
+                    // 获取消息数量
+                    String historyKey = "conversation:" + conversationId;
+                    String historyJson = redisTemplate.opsForValue().get(historyKey);
+                    int messageCount = 0;
+                    if (historyJson != null) {
+                        List<Map<String, String>> history = objectMapper.readValue(historyJson, new TypeReference<List<Map<String, String>>>() {});
+                        messageCount = history.size() / 2; // 每条消息包含 user+assistant，所以除以2
+                    }
+                    
+                    meta.put("id", conversationId);
+                    meta.put("messageCount", messageCount);
+                    result.add(meta);
+                } catch (JsonProcessingException e) {
+                    logger.error("解析会话元数据失败: {}", e.getMessage());
+                }
+            }
+        }
+        
+        logger.info("获取用户 {} 的历史会话列表，共 {} 个", userId, result.size());
+        return result;
+    }
+
+    /**
+     * 切换到指定的历史会话
+     *
+     * @param userId 用户ID
+     * @param conversationId 要切换的会话ID
+     * @return 该会话的历史消息列表
+     */
+    public List<Map<String, String>> switchToConversation(String userId, String conversationId) {
+        // 1. 验证该会话是否属于该用户
+        String listKey = "user:" + userId + ":conversation_list";
+        Boolean isMember = redisTemplate.opsForZSet().score(listKey, conversationId) != null;
+        
+        // 也检查是否是当前会话
+        String currentKey = "user:" + userId + ":current_conversation";
+        String currentConversationId = redisTemplate.opsForValue().get(currentKey);
+        
+        if (!isMember && !conversationId.equals(currentConversationId)) {
+            throw new RuntimeException("会话不存在或不属于当前用户");
+        }
+        
+        // 2. 如果切换的是非当前会话，先保存当前会话
+        if (currentConversationId != null && !currentConversationId.equals(conversationId)) {
+            String historyKey = "conversation:" + currentConversationId;
+            String historyJson = redisTemplate.opsForValue().get(historyKey);
+            if (historyJson != null && !historyJson.isEmpty()) {
+                saveConversationToHistory(userId, currentConversationId);
+            }
+        }
+        
+        // 3. 设置当前会话为新选择的会话
+        redisTemplate.opsForValue().set(currentKey, conversationId, Duration.ofDays(7));
+        
+        // 4. 返回该会话的历史消息
+        List<Map<String, String>> history = getConversationHistory(conversationId);
+        
+        logger.info("用户 {} 切换到会话 {}，包含 {} 条消息", userId, conversationId, history.size());
+        return history;
+    }
+
+    /**
+     * 删除指定的历史会话
+     *
+     * @param userId 用户ID
+     * @param conversationId 要删除的会话ID
+     */
+    public void deleteConversation(String userId, String conversationId) {
+        // 1. 从历史列表中移除
+        String listKey = "user:" + userId + ":conversation_list";
+        redisTemplate.opsForZSet().remove(listKey, conversationId);
+        
+        // 2. 删除会话历史
+        String historyKey = "conversation:" + conversationId;
+        redisTemplate.delete(historyKey);
+        
+        // 3. 删除会话元数据
+        String metaKey = "conversation_meta:" + conversationId;
+        redisTemplate.delete(metaKey);
+        
+        // 4. 如果是当前会话，清除当前会话指针
+        String currentKey = "user:" + userId + ":current_conversation";
+        String currentConversationId = redisTemplate.opsForValue().get(currentKey);
+        if (conversationId.equals(currentConversationId)) {
+            redisTemplate.delete(currentKey);
+        }
+        
+        logger.info("用户 {} 删除会话 {}", userId, conversationId);
+    }
+
+    /**
+     * 保存会话到历史列表
+     */
+    private void saveConversationToHistory(String userId, String conversationId) {
+        String listKey = "user:" + userId + ":conversation_list";
+        
+        // 使用时间戳作为分数，实现按时间排序
+        double score = System.currentTimeMillis() / 1000.0;
+        redisTemplate.opsForZSet().add(listKey, conversationId, score);
+        
+        // 更新元数据中的最后更新时间
+        updateConversationMetadata(conversationId);
+        
+        logger.debug("保存会话 {} 到用户 {} 的历史列表", conversationId, userId);
+    }
+
+    /**
+     * 初始化会话元数据
+     */
+    private void initConversationMetadata(String userId, String conversationId) {
+        String metaKey = "conversation_meta:" + conversationId;
+        String now = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss"));
+        
+        Map<String, Object> meta = new HashMap<>();
+        meta.put("title", "新会话");
+        meta.put("createdAt", now);
+        meta.put("updatedAt", now);
+        
+        try {
+            String json = objectMapper.writeValueAsString(meta);
+            redisTemplate.opsForValue().set(metaKey, json, Duration.ofDays(30));
+        } catch (JsonProcessingException e) {
+            logger.error("序列化会话元数据失败: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 更新会话元数据（最后更新时间）
+     */
+    private void updateConversationMetadata(String conversationId) {
+        String metaKey = "conversation_meta:" + conversationId;
+        String metaJson = redisTemplate.opsForValue().get(metaKey);
+        
+        if (metaJson == null) return;
+        
+        try {
+            Map<String, Object> meta = objectMapper.readValue(metaJson, new TypeReference<Map<String, Object>>() {});
+            String now = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss"));
+            meta.put("updatedAt", now);
+            
+            String json = objectMapper.writeValueAsString(meta);
+            redisTemplate.opsForValue().set(metaKey, json, Duration.ofDays(30));
+        } catch (JsonProcessingException e) {
+            logger.error("更新会话元数据失败: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 更新会话标题（使用第一条消息作为标题）
+     */
+    public void updateConversationTitle(String conversationId, String firstMessage) {
+        String metaKey = "conversation_meta:" + conversationId;
+        String metaJson = redisTemplate.opsForValue().get(metaKey);
+        
+        if (metaJson == null) return;
+        
+        try {
+            Map<String, Object> meta = objectMapper.readValue(metaJson, new TypeReference<Map<String, Object>>() {});
+            
+            // 只在标题还是默认值时更新
+            if ("新会话".equals(meta.get("title"))) {
+                // 截取前20个字符作为标题
+                String title = firstMessage.length() > 20 ? firstMessage.substring(0, 20) + "..." : firstMessage;
+                meta.put("title", title);
+                
+                String json = objectMapper.writeValueAsString(meta);
+                redisTemplate.opsForValue().set(metaKey, json, Duration.ofDays(30));
+                
+                logger.info("更新会话 {} 标题为: {}", conversationId, title);
+            }
+        } catch (JsonProcessingException e) {
+            logger.error("更新会话标题失败: {}", e.getMessage());
+        }
+    }
+
     private List<Map<String, String>> getConversationHistory(String conversationId) {
         String key = "conversation:" + conversationId;
         String json = redisTemplate.opsForValue().get(key);
@@ -234,6 +474,14 @@ public class ChatHandler {
             String json = objectMapper.writeValueAsString(history);
             redisTemplate.opsForValue().set(key, json, Duration.ofDays(7));
             logger.debug("更新会话历史，会话ID: {}, 总消息数: {}", conversationId, history.size());
+            
+            // 如果是第一条消息，更新会话标题
+            if (history.size() == 2) { // 第一轮对话（1条user + 1条assistant）
+                updateConversationTitle(conversationId, userMessage);
+            }
+            
+            // 更新元数据的最后更新时间
+            updateConversationMetadata(conversationId);
         } catch (JsonProcessingException e) {
             logger.error("序列化对话历史出错: {}, 会话ID: {}", e.getMessage(), conversationId, e);
         }

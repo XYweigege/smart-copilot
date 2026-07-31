@@ -1,13 +1,169 @@
 <script setup lang="ts">
+import { useChatStore } from '@/store/modules/chat';
 import ChatList from './modules/chat-list.vue';
 import InputBox from './modules/input-box.vue';
+
+const chatStore = useChatStore();
+
+// 新建会话
+async function handleNewConversation() {
+  try {
+    await chatStore.newConversation();
+  } catch (error) {
+    console.error('新建会话失败:', error);
+  }
+}
+
+// 查看历史记录
+function handleViewHistory() {
+  chatStore.viewHistory();
+}
+
+// 截断消息内容
+function truncateContent(content: string, len = 30): string {
+  if (!content) return '';
+  return content.length > len ? content.substring(0, len) + '...' : content;
+}
+
+// 格式化时间显示
+function formatTime(dateStr: string): string {
+  if (!dateStr || dateStr === '未知时间') return '';
+  const date = new Date(dateStr.replace(' ', 'T'));
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  
+  if (diffMins < 1) return '刚刚';
+  if (diffMins < 60) return `${diffMins}分钟前`;
+  if (diffHours < 24) return `${diffHours}小时前`;
+  if (diffDays < 7) return `${diffDays}天前`;
+  
+  return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+}
 </script>
 
 <template>
-  <div class="flex-col gap-4">
-    <ChatList />
-    <InputBox />
+  <div class="chat-container flex h-full relative">
+    <!-- 历史记录侧边栏 -->
+    <Transition name="slide">
+      <div 
+        v-if="chatStore.showHistorySidebar"
+        class="history-sidebar w-80 bg-white border-r border-gray-200 flex flex-col shadow-lg absolute left-0 top-0 h-full z-10 rounded-l-xl"
+      >
+        <!-- 侧边栏头部 -->
+        <div class="p-4 border-b border-gray-200 flex items-center justify-between">
+          <h3 class="text-lg font-semibold text-gray-800">历史消息</h3>
+          <button 
+            @click="chatStore.toggleHistorySidebar()"
+            class="p-1 hover:bg-gray-100 rounded-md transition-colors"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        
+        <!-- 消息列表 -->
+        <div class="flex-1 overflow-y-auto p-2">
+          <!-- 空状态 -->
+          <div v-if="chatStore.historyMessages.length === 0" class="text-center py-8 text-gray-400">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto mb-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            </svg>
+            <p class="text-sm">暂无历史消息</p>
+          </div>
+          
+          <!-- 消息项列表 -->
+          <div v-else class="space-y-2">
+            <div
+              v-for="(msg, idx) in chatStore.historyMessages"
+              :key="idx"
+              class="p-3 rounded-lg border border-gray-100 hover:bg-gray-50 transition-colors"
+            >
+              <!-- 角色标签 -->
+              <div class="flex items-center gap-2 mb-1">
+                <span 
+                  class="text-xs px-2 py-0.5 rounded-full font-medium"
+                  :class="msg.role === 'user' ? 'bg-blue-50 text-blue-600' : 'bg-green-50 text-green-600'"
+                >
+                  {{ msg.role === 'user' ? '我' : 'AI' }}
+                </span>
+                <span class="text-xs text-gray-400">{{ formatTime(msg.timestamp) }}</span>
+              </div>
+              
+              <!-- 消息内容 -->
+              <div class="text-sm text-gray-700 line-clamp-3">
+                {{ truncateContent(msg.content, 50) }}
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 底部操作区 -->
+        <div class="p-4 border-t border-gray-200">
+          <button
+            @click="handleViewHistory"
+            :disabled="chatStore.historyMessages.length === 0"
+            class="w-full px-4 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 text-white rounded-lg transition-colors duration-200 text-sm font-medium"
+          >
+            加载到对话中
+          </button>
+        </div>
+      </div>
+    </Transition>
+    
+    <!-- 主聊天区域 -->
+    <div class="flex-1 flex flex-col gap-4 transition-all duration-300" :class="{ 'ml-80': chatStore.showHistorySidebar }">
+      <!-- 顶部按钮栏 -->
+      <div class="flex justify-between items-center mb-2">
+        <!-- 历史记录按钮 -->
+        <button
+          @click="chatStore.toggleHistorySidebar()"
+          class="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors duration-200 text-sm font-medium"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          历史记录
+        </button>
+        
+        <!-- 新会话按钮 -->
+        <button
+          @click="handleNewConversation"
+          class="flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors duration-200 text-sm font-medium shadow-sm hover:shadow-md"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+          </svg>
+          新会话
+        </button>
+      </div>
+      
+      <ChatList />
+      <InputBox />
+    </div>
   </div>
 </template>
 
-<style scoped></style>
+<style scoped>
+/* 侧边栏滑入动画 */
+.slide-enter-active,
+.slide-leave-active {
+  transition: transform 0.3s ease;
+}
+
+.slide-enter-from,
+.slide-leave-to {
+  transform: translateX(-100%);
+}
+
+/* 文本截断3行 */
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+</style>
