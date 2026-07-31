@@ -23,13 +23,6 @@ public class DocumentVector {
     @Column(nullable = false)
     private Integer chunkId;
 
-    /**
-     * 父块ID，标识该子切片属于哪个父块
-     * 用于 Parent Chunk 上下文扩展：检索时用子切片精准匹配，返回时回溯父块获取更大上下文
-     */
-    @Column(name = "parent_chunk_id")
-    private Integer parentChunkId;
-
     @Lob
     private String textContent;
 
@@ -53,4 +46,10 @@ public class DocumentVector {
      */
     @Column(name = "is_public", nullable = false)
     private boolean isPublic = false;
+
+    /**
+     * 父块ID（用于 Parent Chunk 上下文扩展）
+     */
+    @Column(name = "parent_chunk_id")
+    private Integer parentChunkId;
 }

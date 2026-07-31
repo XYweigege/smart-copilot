@@ -39,11 +39,8 @@ public class ChatHandler {
     private final RedisTemplate<String, String> redisTemplate;
     private final HybridSearchService searchService;
     private final DeepSeekClient deepSeekClient;
-    private final QueryRewriteService queryRewriteService;
-    private final TopKStrategyService topKStrategyService;
     private final DocumentVectorRepository documentVectorRepository;
     private final ConversationSummaryService conversationSummaryService;
-    private final IntentRecognitionService intentRecognitionService;
     private final ObjectMapper objectMapper;
     
     // 用于存储每个会话的完整响应
@@ -60,19 +57,13 @@ public class ChatHandler {
     public ChatHandler(RedisTemplate<String, String> redisTemplate,
                       HybridSearchService searchService,
                       DeepSeekClient deepSeekClient,
-                      QueryRewriteService queryRewriteService,
-                      TopKStrategyService topKStrategyService,
                       DocumentVectorRepository documentVectorRepository,
-                      ConversationSummaryService conversationSummaryService,
-                      IntentRecognitionService intentRecognitionService) {
+                      ConversationSummaryService conversationSummaryService) {
         this.redisTemplate = redisTemplate;
         this.searchService = searchService;
         this.deepSeekClient = deepSeekClient;
-        this.queryRewriteService = queryRewriteService;
-        this.topKStrategyService = topKStrategyService;
         this.documentVectorRepository = documentVectorRepository;
         this.conversationSummaryService = conversationSummaryService;
-        this.intentRecognitionService = intentRecognitionService;
         this.objectMapper = new ObjectMapper();
     }
 
@@ -96,41 +87,17 @@ public class ChatHandler {
             List<Map<String, String>> fullHistory = getConversationHistory(conversationId);
             logger.debug("获取到 {} 条历史对话", fullHistory.size());
 
-            // 3. 意图识别：判断用户意图类型
-            IntentRecognitionService.IntentType intent = intentRecognitionService.recognize(userMessage);
-            logger.info("意图识别: '{}' -> {}", userMessage, intent);
-
-            // 4. 对话摘要：将完整历史压缩为摘要+近期消息，减少 token 消耗
+            // 3. 对话摘要：将完整历史压缩为摘要+近期消息，减少 token 消耗
             List<Map<String, String>> history = conversationSummaryService
                     .getContextWithSummary(conversationId, fullHistory);
 
-            // 5. 根据意图类型路由到不同处理流程
-            String context;
-            if (intent == IntentRecognitionService.IntentType.CHITCHAT) {
-                // 闲聊意图：跳过检索，直接对话
-                logger.info("闲聊意图，跳过检索");
-                context = "";
-            } else if (intent == IntentRecognitionService.IntentType.OPERATION) {
-                // 操作指令：提示用户当前不支持
-                logger.info("操作指令意图，返回提示");
-                context = "用户请求了操作指令，当前系统暂不支持直接操作，请通过界面菜单完成相关操作。";
-            } else {
-                // 知识问答意图：执行 RAG 检索流程
-                // 5.1 查询改写：结合完整对话历史，将模糊查询改写为具体查询
-                String rewrittenQuery = queryRewriteService.rewrite(userMessage, fullHistory);
-                logger.info("查询改写: '{}' -> '{}'", userMessage, rewrittenQuery);
+            // 4. 执行 RAG 检索流程
+            // 4.1 执行带权限过滤的混合搜索
+            List<SearchResult> searchResults = searchService.searchWithPermission(userMessage, userId, 5);
+            logger.debug("搜索结果数量: {}", searchResults.size());
 
-                // 5.2 计算自适应 topK
-                int topK = topKStrategyService.calculateTopK(rewrittenQuery);
-                logger.info("自适应 topK: {} (查询: '{}')", topK, rewrittenQuery);
-
-                // 5.3 执行带权限过滤的混合搜索（使用改写后的查询和自适应 topK）
-                List<SearchResult> searchResults = searchService.searchWithPermission(rewrittenQuery, userId, topK);
-                logger.debug("搜索结果数量: {}", searchResults.size());
-
-                // 5.4 构建上下文（RAG 检索结果）
-                context = buildContext(searchResults, session.getId());
-            }
+            // 4.2 构建上下文（RAG 检索结果）
+            String context = buildContext(searchResults, session.getId());
             
             // 8. 调用 DeepSeek API 并处理流式响应
             logger.info("调用DeepSeek API生成回复");

@@ -3,7 +3,6 @@ package com.yizhaoqi.smartpai.service;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import com.yizhaoqi.smartpai.client.EmbeddingClient;
-import com.yizhaoqi.smartpai.client.RerankClient;
 import com.yizhaoqi.smartpai.entity.EsDocument;
 import com.yizhaoqi.smartpai.entity.SearchResult;
 import com.yizhaoqi.smartpai.model.User;
@@ -14,7 +13,6 @@ import com.yizhaoqi.smartpai.model.FileUpload;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import co.elastic.clients.elasticsearch._types.query_dsl.Operator;
@@ -44,9 +42,6 @@ public class HybridSearchService {
     private EmbeddingClient embeddingClient;
 
     @Autowired
-    private RerankClient rerankClient;
-
-    @Autowired
     private UserService userService;
 
     @Autowired
@@ -60,12 +55,6 @@ public class HybridSearchService {
 
     @Autowired
     private KnowledgeGraphService knowledgeGraphService;
-
-    @Value("${rerank.enabled:true}")
-    private boolean rerankEnabled;
-
-    @Value("${rerank.candidate-size:30}")
-    private int rerankCandidateSize;
 
     /**
      * 使用文本匹配和向量相似度进行混合搜索，支持权限过滤
@@ -101,19 +90,17 @@ public class HybridSearchService {
 
             SearchResponse<EsDocument> response = esClient.search(s -> {
                         s.index("knowledge_base");
-                        // KNN 召回：使用 rerankCandidateSize 作为召回窗口
-                        int recallK = rerankEnabled ? rerankCandidateSize : topK * 30;
+                        // KNN 召回
+                        int recallK = topK * 30; // KNN 召回窗口
                         s.knn(kn -> kn
                                 .field("vector")
                                 .queryVector(queryVector)
                                 .k(recallK)
                                 .numCandidates(recallK)
                         );
-                        // 语义召回：KNN 负责召回，关键词匹配仅作为软信号（should），
-                        // 不要把关键词做成 must 硬过滤，否则改写/语义化提问会被全部过滤掉。
-                        // 权限过滤保持 .filter 不变。
+                        // 必须命中关键词 + 权限过滤
                         s.query(q -> q.bool(b -> b
-                                .should(mst -> mst.match(m -> m.field("textContent").query(query)))
+                                .must(mst -> mst.match(m -> m.field("textContent").query(query)))
                                 .filter(f -> f.bool(bf -> bf
                                         // 条件1: 用户可访问自己的文档
                                         .should(s1 -> s1.term(t -> t.field("userId").value(userDbId)))
@@ -148,7 +135,7 @@ public class HybridSearchService {
                                         ))
                                 )
                         );
-                        s.size(recallK);
+                        s.size(topK);
                         return s;
                     }, EsDocument.class);
 
@@ -171,20 +158,10 @@ public class HybridSearchService {
                                 hit.source().isPublic()
                         );
                     })
-                    .collect(Collectors.toCollection(ArrayList::new));
+                    .toList();
 
             logger.debug("返回搜索结果数量: {}", results.size());
             attachFileNames(results);
-
-            // 第三阶段：Rerank 精排
-            if (rerankEnabled && results.size() > topK) {
-                logger.debug("开始 Rerank 精排，候选数: {}, topK: {}", results.size(), topK);
-                results = new ArrayList<>(rerankClient.rerank(query, results, topK));
-                logger.debug("Rerank 精排完成，结果数: {}", results.size());
-            } else if (results.size() > topK) {
-                // 未启用 rerank 时，直接截取 topK
-                results = results.subList(0, topK);
-            }
 
             // 融合知识图谱关系检索结果
             results = fuseGraphResults(results, query, userId, userEffectiveTags, topK);
