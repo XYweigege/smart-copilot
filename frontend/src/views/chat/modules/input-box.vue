@@ -18,6 +18,13 @@ const sendable = computed(
 
 watch(wsData, val => {
   const data = JSON.parse(val);
+
+  // 后端回传当前会话ID，保持前后端会话状态同步
+  if (data.type === 'conversation' && data.conversationId) {
+    chatStore.conversationId = data.conversationId;
+    return;
+  }
+
   const assistant = list.value[list.value.length - 1];
 
   if (data.type === 'completion' && data.status === 'finished' && assistant.status !== 'error')

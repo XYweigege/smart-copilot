@@ -77,7 +77,10 @@ public class ChatHandler {
             // 1. 获取或创建会话 ID
             String conversationId = getOrCreateConversationId(userId);
             logger.info("会话ID: {}, 用户ID: {}", conversationId, userId);
-            
+
+            // 将当前会话ID回传给前端，确保前后端会话状态同步（修复历史会话切换/高亮不一致问题）
+            sendConversationId(session, conversationId);
+
             // 为当前会话创建响应构建器
             responseBuilders.put(session.getId(), new StringBuilder());
             // 创建一个CompletableFuture来跟踪响应完成状态
@@ -244,20 +247,26 @@ public class ChatHandler {
         for (String conversationId : conversationIds) {
             String metaKey = "conversation_meta:" + conversationId;
             String metaJson = redisTemplate.opsForValue().get(metaKey);
-            
+
+            String historyKey = "conversation:" + conversationId;
+            String historyJson = redisTemplate.opsForValue().get(historyKey);
+
+            // 清理历史记录缺失的脏数据会话（历史会话无消息内容，予以过滤并从列表移除）
+            if (historyJson == null || historyJson.isEmpty()) {
+                redisTemplate.opsForZSet().remove(listKey, conversationId);
+                redisTemplate.delete(metaKey);
+                logger.info("清理无历史记录的脏数据会话: {}", conversationId);
+                continue;
+            }
+
             if (metaJson != null) {
                 try {
                     Map<String, Object> meta = objectMapper.readValue(metaJson, new TypeReference<Map<String, Object>>() {});
-                    
-                    // 获取消息数量
-                    String historyKey = "conversation:" + conversationId;
-                    String historyJson = redisTemplate.opsForValue().get(historyKey);
-                    int messageCount = 0;
-                    if (historyJson != null) {
-                        List<Map<String, String>> history = objectMapper.readValue(historyJson, new TypeReference<List<Map<String, String>>>() {});
-                        messageCount = history.size() / 2; // 每条消息包含 user+assistant，所以除以2
-                    }
-                    
+
+                    // 获取消息数量（user 与 assistant 各计一条）
+                    List<Map<String, String>> history = objectMapper.readValue(historyJson, new TypeReference<List<Map<String, String>>>() {});
+                    int messageCount = history.size();
+
                     meta.put("conversationId", conversationId);
                     meta.put("messageCount", messageCount);
                     result.add(meta);
@@ -344,7 +353,7 @@ public class ChatHandler {
         // 4. 如果是当前会话，清除当前会话指针
         String currentKey = "user:" + userId + ":current_conversation";
         String currentConversationId = redisTemplate.opsForValue().get(currentKey);
-        if (conversationId.equals(currentConversationId)) {
+        if (conversationId != null && conversationId.equals(currentConversationId)) {
             redisTemplate.delete(currentKey);
         }
         
@@ -725,6 +734,19 @@ public class ChatHandler {
             logger.info("已发送响应完成通知到会话: {}", session.getId());
         } catch (Exception e) {
             logger.error("发送完成通知失败: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 将当前会话ID回传给前端，确保前后端会话状态一致（用于侧边栏高亮与继续聊天）。
+     */
+    private void sendConversationId(WebSocketSession session, String conversationId) {
+        try {
+            Map<String, String> payload = Map.of("type", "conversation", "conversationId", conversationId);
+            String json = objectMapper.writeValueAsString(payload);
+            session.sendMessage(new TextMessage(json));
+        } catch (Exception e) {
+            logger.error("发送会话ID失败: {}", e.getMessage(), e);
         }
     }
 
