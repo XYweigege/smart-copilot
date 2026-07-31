@@ -181,6 +181,15 @@ declare namespace Api {
       conversationId: string;
     }
 
+    /** 历史会话列表项 */
+    interface ConversationSummary {
+      conversationId: string;
+      title: string;
+      messageCount: number;
+      createdAt: string;
+      updatedAt: string;
+    }
+
     interface Message {
       role: 'user' | 'assistant';
       content: string;

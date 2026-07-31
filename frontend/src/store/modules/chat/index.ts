@@ -1,14 +1,20 @@
 import { useWebSocket } from '@vueuse/core';
-import { fetchNewConversation, fetchConversations } from '@/service/api/chat';
+import {
+  fetchNewConversation,
+  fetchConversations,
+  fetchConversationList,
+  switchConversation,
+  deleteConversation
+} from '@/service/api/chat';
 
 export const useChatStore = defineStore(SetupStoreId.Chat, () => {
   const conversationId = ref<string>('');
   const input = ref<Api.Chat.Input>({ message: '' });
 
   const list = ref<Api.Chat.Message[]>([]);
-  
-  // 历史会话消息（从后端获取）
-  const historyMessages = ref<Api.Chat.Message[]>([]);
+
+  // 历史会话列表（多个会话，用于"继续聊天"）
+  const conversationList = ref<Api.Chat.ConversationSummary[]>([]);
   // 是否显示历史记录侧边栏
   const showHistorySidebar = ref(false);
 
@@ -47,16 +53,19 @@ export const useChatStore = defineStore(SetupStoreId.Chat, () => {
   async function newConversation() {
     try {
       // 调用后端 API 创建新会话（清除旧会话历史）
-      await fetchNewConversation();
+      const { data, error } = await fetchNewConversation();
+      if (error || !data) {
+        throw new Error('创建新会话失败');
+      }
 
       // 清空前端消息列表
       list.value = [];
 
-      // 重置 conversationId
-      conversationId.value = '';
+      // 重置 conversationId 为后端返回的新会话ID
+      conversationId.value = data.conversationId;
 
       // 重新加载历史会话列表，确保侧边栏会话数据同步
-      await loadConversations();
+      await loadConversationList();
 
       console.log('新会话已创建，消息列表已清空');
     } catch (error) {
@@ -66,32 +75,64 @@ export const useChatStore = defineStore(SetupStoreId.Chat, () => {
   }
 
   /**
-   * 加载当前会话的历史消息（使用项目已有的 ConversationController 接口）
-   * request 封装会自动解包，fetchConversations 返回的 data 已是消息数组 Message[]
+   * 加载历史会话列表（多会话，用于侧边栏"继续聊天"）
+   * 接口: GET /api/v1/chat/conversations
+   * request 封装会自动解包，data 已是 ConversationSummary[] 数组
    */
-  async function loadConversations() {
+  async function loadConversationList() {
     try {
-      const { data, error } = await fetchConversations();
+      const { data, error } = await fetchConversationList();
       if (error) {
-        console.error('加载历史消息失败:', error);
+        console.error('加载会话列表失败:', error);
         return;
       }
-      // data 已是 Message[] 数组（request 已解包 response.data.data）
-      historyMessages.value = Array.isArray(data) ? data : [];
-      console.log('加载历史消息成功，共', historyMessages.value.length, '条消息');
+      conversationList.value = Array.isArray(data) ? data : [];
+      console.log('加载会话列表成功，共', conversationList.value.length, '个会话');
     } catch (error) {
-      console.error('加载历史消息失败:', error);
+      console.error('加载会话列表失败:', error);
     }
   }
 
   /**
-   * 查看历史记录 - 将历史消息加载到当前聊天列表
+   * 切换到指定历史会话并加载其消息（继续聊天）
+   * 后端 switch-conversation 会把 current_conversation 指向目标会话，
+   * 后续 WebSocket 消息会自动落入该会话，无需重连 WS
    */
-  function viewHistory() {
-    if (historyMessages.value.length > 0) {
-      list.value = [...historyMessages.value];
+  async function switchToConversation(id: string) {
+    try {
+      const { data, error } = await switchConversation(id);
+      if (error || !data) {
+        throw new Error('切换会话失败');
+      }
+      conversationId.value = data.conversationId;
+      list.value = Array.isArray(data.messages) ? data.messages : [];
       showHistorySidebar.value = false;
-      console.log('查看历史记录，加载', historyMessages.value.length, '条消息');
+      console.log('切换到会话', id, '，加载', list.value.length, '条消息');
+    } catch (error) {
+      console.error('切换会话失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 删除指定历史会话，并刷新列表
+   */
+  async function removeConversation(id: string) {
+    try {
+      const { error } = await deleteConversation(id);
+      if (error) {
+        throw new Error('删除会话失败');
+      }
+      await loadConversationList();
+      // 若删除的是当前会话，清空对话区
+      if (conversationId.value === id) {
+        conversationId.value = '';
+        list.value = [];
+      }
+      console.log('删除会话成功:', id);
+    } catch (error) {
+      console.error('删除会话失败:', error);
+      throw error;
     }
   }
 
@@ -100,10 +141,10 @@ export const useChatStore = defineStore(SetupStoreId.Chat, () => {
    */
   function toggleHistorySidebar() {
     showHistorySidebar.value = !showHistorySidebar.value;
-    
-    // 打开时加载历史消息
+
+    // 打开时加载会话列表
     if (showHistorySidebar.value) {
-      loadConversations();
+      loadConversationList();
     }
   }
 
@@ -120,7 +161,7 @@ export const useChatStore = defineStore(SetupStoreId.Chat, () => {
     input,
     conversationId,
     list,
-    historyMessages,
+    conversationList,
     showHistorySidebar,
     wsStatus,
     wsData,
@@ -131,8 +172,9 @@ export const useChatStore = defineStore(SetupStoreId.Chat, () => {
     scrollToBottom,
     newConversation,
     clearMessages,
-    loadConversations,
-    viewHistory,
+    loadConversationList,
+    switchToConversation,
+    removeConversation,
     toggleHistorySidebar
   };
 });

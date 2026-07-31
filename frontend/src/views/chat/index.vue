@@ -14,9 +14,22 @@ async function handleNewConversation() {
   }
 }
 
-// 查看历史记录
-function handleViewHistory() {
-  chatStore.viewHistory();
+// 切换到指定历史会话（继续聊天）
+async function handleSwitchConversation(id: string) {
+  try {
+    await chatStore.switchToConversation(id);
+  } catch (error) {
+    console.error('切换会话失败:', error);
+  }
+}
+
+// 删除指定历史会话
+async function handleDeleteConversation(id: string) {
+  try {
+    await chatStore.removeConversation(id);
+  } catch (error) {
+    console.error('删除会话失败:', error);
+  }
 }
 
 // 截断消息内容
@@ -54,7 +67,7 @@ function formatTime(dateStr: string): string {
       >
         <!-- 侧边栏头部 -->
         <div class="p-4 border-b border-gray-200 flex items-center justify-between">
-          <h3 class="text-lg font-semibold text-gray-800">历史消息</h3>
+          <h3 class="text-lg font-semibold text-gray-800">历史会话</h3>
           <button 
             @click="chatStore.toggleHistorySidebar()"
             class="p-1 hover:bg-gray-100 rounded-md transition-colors"
@@ -65,37 +78,44 @@ function formatTime(dateStr: string): string {
           </button>
         </div>
         
-        <!-- 消息列表 -->
+        <!-- 会话列表 -->
         <div class="flex-1 overflow-y-auto p-2">
           <!-- 空状态 -->
-          <div v-if="chatStore.historyMessages.length === 0" class="text-center py-8 text-gray-400">
+          <div v-if="chatStore.conversationList.length === 0" class="text-center py-8 text-gray-400">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto mb-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
             </svg>
-            <p class="text-sm">暂无历史消息</p>
+            <p class="text-sm">暂无历史会话</p>
           </div>
           
-          <!-- 消息项列表 -->
+          <!-- 会话项列表 -->
           <div v-else class="space-y-2">
             <div
-              v-for="(msg, idx) in chatStore.historyMessages"
-              :key="idx"
-              class="p-3 rounded-lg border border-gray-100 hover:bg-gray-50 transition-colors"
+              v-for="conv in chatStore.conversationList"
+              :key="conv.conversationId"
+              class="group p-3 rounded-lg border border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer"
+              :class="conv.conversationId === chatStore.conversationId ? 'bg-blue-50 border-blue-200' : ''"
+              @click="handleSwitchConversation(conv.conversationId)"
             >
-              <!-- 角色标签 -->
-              <div class="flex items-center gap-2 mb-1">
-                <span 
-                  class="text-xs px-2 py-0.5 rounded-full font-medium"
-                  :class="msg.role === 'user' ? 'bg-blue-50 text-blue-600' : 'bg-green-50 text-green-600'"
+              <!-- 标题与删除 -->
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-sm font-medium text-gray-800 truncate flex-1">{{ conv.title || '未命名会话' }}</span>
+                <button
+                  class="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-50 rounded transition-opacity"
+                  @click.stop="handleDeleteConversation(conv.conversationId)"
+                  title="删除会话"
                 >
-                  {{ msg.role === 'user' ? '我' : 'AI' }}
-                </span>
-                <span class="text-xs text-gray-400">{{ formatTime(msg.timestamp) }}</span>
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
               </div>
               
-              <!-- 消息内容 -->
-              <div class="text-sm text-gray-700 line-clamp-3">
-                {{ truncateContent(msg.content, 50) }}
+              <!-- 元信息 -->
+              <div class="flex items-center gap-2 mt-1">
+                <span class="text-xs text-gray-400">{{ formatTime(conv.updatedAt) }}</span>
+                <span class="text-xs text-gray-400">·</span>
+                <span class="text-xs text-gray-400">{{ conv.messageCount }} 条消息</span>
               </div>
             </div>
           </div>
@@ -104,11 +124,10 @@ function formatTime(dateStr: string): string {
         <!-- 底部操作区 -->
         <div class="p-4 border-t border-gray-200">
           <button
-            @click="handleViewHistory"
-            :disabled="chatStore.historyMessages.length === 0"
-            class="w-full px-4 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 text-white rounded-lg transition-colors duration-200 text-sm font-medium"
+            @click="handleNewConversation"
+            class="w-full px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors duration-200 text-sm font-medium"
           >
-            加载到对话中
+            新建会话
           </button>
         </div>
       </div>

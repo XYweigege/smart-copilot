@@ -34,6 +34,18 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     public void afterConnectionEstablished(WebSocketSession session) {
         String userId = extractUserId(session);
         sessions.put(userId, session);
+
+        // 若连接时携带 conversationId 查询参数，则切换到指定会话（支持"继续聊天"）
+        String conversationId = extractConversationId(session);
+        if (conversationId != null && !conversationId.isEmpty()) {
+            try {
+                chatHandler.switchToConversation(userId, conversationId);
+                logger.info("WebSocket连接时切换至会话 {}，用户ID: {}", conversationId, userId);
+            } catch (Exception e) {
+                logger.warn("WebSocket连接时切换会话失败（忽略）: {}", e.getMessage());
+            }
+        }
+
         logger.info("WebSocket连接已建立，用户ID: {}，会话ID: {}，URI路径: {}",
                     userId, session.getId(), session.getUri().getPath());
 
@@ -118,6 +130,27 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         
         logger.debug("从JWT令牌中提取的用户名: {}", username);
         return username;
+    }
+
+    /**
+     * 从连接 URL 的查询参数中提取 conversationId（用于"继续聊天"时指定会话）
+     */
+    private String extractConversationId(WebSocketSession session) {
+        try {
+            String query = session.getUri().getQuery();
+            if (query == null || query.isEmpty()) {
+                return null;
+            }
+            for (String pair : query.split("&")) {
+                String[] kv = pair.split("=", 2);
+                if (kv.length == 2 && "conversationId".equals(kv[0])) {
+                    return java.net.URLDecoder.decode(kv[1], "UTF-8");
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("解析 conversationId 失败: {}", e.getMessage());
+        }
+        return null;
     }
 
     private void sendErrorMessage(WebSocketSession session, String errorMessage) {
