@@ -30,4 +30,7 @@ public class Conversation {
 
     @CreationTimestamp
     private LocalDateTime timestamp; // 对话时间戳
+
+    @Column(name = "conversation_id", length = 64)
+    private String conversationId; // 关联的会话UUID（与Redis中的会话ID一致，便于按会话维度查询）
 }

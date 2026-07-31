@@ -7,6 +7,7 @@ import com.yizhaoqi.smartpai.client.DeepSeekClient;
 import com.yizhaoqi.smartpai.entity.SearchResult;
 import com.yizhaoqi.smartpai.model.DocumentVector;
 import com.yizhaoqi.smartpai.repository.DocumentVectorRepository;
+import com.yizhaoqi.smartpai.service.ConversationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -42,6 +43,7 @@ public class ChatHandler {
     private final DeepSeekClient deepSeekClient;
     private final DocumentVectorRepository documentVectorRepository;
     private final ConversationSummaryService conversationSummaryService;
+    private final ConversationService conversationService;
     private final ObjectMapper objectMapper;
     
     // 用于存储每个会话的完整响应
@@ -59,12 +61,14 @@ public class ChatHandler {
                       HybridSearchService searchService,
                       DeepSeekClient deepSeekClient,
                       DocumentVectorRepository documentVectorRepository,
-                      ConversationSummaryService conversationSummaryService) {
+                      ConversationSummaryService conversationSummaryService,
+                      ConversationService conversationService) {
         this.redisTemplate = redisTemplate;
         this.searchService = searchService;
         this.deepSeekClient = deepSeekClient;
         this.documentVectorRepository = documentVectorRepository;
         this.conversationSummaryService = conversationSummaryService;
+        this.conversationService = conversationService;
         this.objectMapper = new ObjectMapper();
     }
 
@@ -237,6 +241,15 @@ public class ChatHandler {
      */
     public List<Map<String, Object>> getConversationHistoryList(String userId) {
         String listKey = "user:" + userId + ":conversation_list";
+
+        // 防御：若 listKey 被错误创建为其他类型（如 String），先清理再重建，避免读取时 WRONGTYPE 异常
+        try {
+            redisTemplate.opsForZSet().zCard(listKey);
+        } catch (Exception e) {
+            logger.warn("会话列表键类型异常，重建为 ZSet: {}", listKey);
+            redisTemplate.delete(listKey);
+        }
+
         Set<String> conversationIds = redisTemplate.opsForZSet().reverseRange(listKey, 0, 19); // 最近20个会话
         
         List<Map<String, Object>> result = new ArrayList<>();
@@ -365,11 +378,21 @@ public class ChatHandler {
      */
     private void saveConversationToHistory(String userId, String conversationId) {
         String listKey = "user:" + userId + ":conversation_list";
-        
+
+        // 防御：若历史遗留数据将 listKey 错误创建为其他类型（如 String），先清理再重建为 ZSet，避免 WRONGTYPE 异常
+        try {
+            redisTemplate.opsForZSet().zCard(listKey);
+        } catch (Exception e) {
+            logger.warn("会话列表键类型异常，重建为 ZSet: {}", listKey);
+            redisTemplate.delete(listKey);
+        }
+
         // 使用时间戳作为分数，实现按时间排序
         double score = System.currentTimeMillis() / 1000.0;
         redisTemplate.opsForZSet().add(listKey, conversationId, score);
-        
+        // 给会话列表键设置过期时间（30天），避免列表无限增长且 Redis 重启/淘汰时不留垃圾
+        redisTemplate.expire(listKey, Duration.ofDays(30));
+
         // 更新元数据中的最后更新时间
         updateConversationMetadata(conversationId);
         
@@ -691,6 +714,16 @@ public class ChatHandler {
 
         // 1.1 将本次会话纳入用户的历史会话列表，确保侧边栏能展示并支持继续聊天
         saveConversationToHistory(userId, conversationId);
+
+        // 1.2 持久化到 MySQL（与 Redis 双写），即使 Redis 重启或过期也不丢失完整对话记录
+        try {
+            Long uid = Long.valueOf(userId);
+            conversationService.recordConversation(uid, conversationId, userMessage, aiResponse);
+        } catch (Exception e) {
+            // MySQL 落库失败不影响 Redis 主流程，仅记录告警，避免阻塞对话
+            logger.error("对话落库 MySQL 失败（Redis 已保存），用户: {}, 会话: {}, 原因: {}",
+                    userId, conversationId, e.getMessage(), e);
+        }
 
         // 2. 清理会话用户映射
         sessionUserMapping.remove(sessionId);

@@ -60,3 +60,15 @@ CREATE TABLE document_vectors (
     org_tag VARCHAR(50) COMMENT '文件所属组织标签',
     is_public TINYINT(1) NOT NULL DEFAULT 0 COMMENT '文件是否公开'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文档向量存储表';
+
+CREATE TABLE conversations (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '对话记录唯一标识',
+    user_id BIGINT NOT NULL COMMENT '关联用户ID',
+    conversation_id VARCHAR(64) DEFAULT NULL COMMENT '会话UUID，与Redis中的会话ID一致，便于按会话维度查询',
+    question TEXT NOT NULL COMMENT '用户提问内容',
+    answer TEXT NOT NULL COMMENT '系统回答内容',
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '对话时间戳',
+    INDEX idx_user_id (user_id) COMMENT '用户ID索引',
+    INDEX idx_conversation_id (conversation_id) COMMENT '会话ID索引',
+    FOREIGN KEY (user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='对话历史表';

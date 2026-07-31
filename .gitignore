@@ -54,6 +54,8 @@ pnpm-debug.log*
 lerna-debug.log*
 dev.err
 frontend/dev.err
+backend.err
+backend.log
 
 # ==================== Env files ====================
 .env.local
