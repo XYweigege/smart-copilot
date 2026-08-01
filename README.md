@@ -39,7 +39,7 @@ docker -v          # 应显示 Docker version ...
 
 ## 二、数据库初始化（重要！）
 
-后端连接的数据库叫 **`paimart`**。项目里已经提供了建库建表的 SQL 脚本：`docs/databases/ddl.sql`。
+后端连接的数据库叫 **`paismart`**。项目里已经提供了建库建表的 SQL 脚本：`docs/databases/ddl.sql`。
 
 请按下面步骤操作（以 Docker 后的 MySQL 为例，端口 `3306`，账号 `root`，密码 `PaiSmart2025`）：
 
@@ -53,13 +53,13 @@ docker -v          # 应显示 Docker version ...
 # 进入项目目录
 cd <项目根目录>
 
-# 把 ddl.sql 导入到 MySQL（会先 CREATE DATABASE paimart 再建表）
+# 把 ddl.sql 导入到 MySQL（会先 CREATE DATABASE paismart 再建表）
 mysql -h 127.0.0.1 -P 3306 -u root -pPaiSmart2025 < docs/databases/ddl.sql
 ```
 
 执行成功后会创建以下库和表：
 
-- 数据库：`paimart`
+- 数据库：`paismart`
 - 表：`users`（用户）、`organization_tags`（组织标签）、`file_upload`（文件上传记录）、`chunk_info`（分块信息）、`document_vectors`（文档向量）、`conversations`（对话历史）
 
 ### 2.2 初始化管理员账号（可选但推荐）
@@ -67,7 +67,7 @@ mysql -h 127.0.0.1 -P 3306 -u root -pPaiSmart2025 < docs/databases/ddl.sql
 `ddl.sql` 只建了表结构，没有默认用户。如果你想直接用代码里的默认账号 `admin / admin123` 登录，需要手动插入一条管理员记录（密码是 BCrypt 加密后的字符串，下面给出的是与默认账号匹配的 hash）：
 
 ```sql
-USE paimart;
+USE paismart;
 
 INSERT INTO users (username, password, role, org_tags, primary_org, created_at, updated_at)
 VALUES (
@@ -140,7 +140,7 @@ server:
 
 spring:
   datasource:
-    url: jdbc:mysql://localhost:3306/paimart   # 注意库名是 paimart
+    url: jdbc:mysql://localhost:3306/paismart   # 库名是 paismart
     username: root
     password: PaiSmart2025
   data:
@@ -374,7 +374,7 @@ PaiSmart-main/
 │
 ├── docs/
 │   ├── docker-compose.yaml   # 一键起 MySQL/Redis/Kafka/ES/MinIO/Neo4j
-│   ├── databases/ddl.sql     # 建库建表 SQL（库名 paimart）
+│   ├── databases/ddl.sql     # 建库建表 SQL（库名 paismart）
 │   └── init_es.sh            # ES 索引 + IK 分词初始化
 │
 ├── README.md / DEPLOYMENT.md
@@ -420,7 +420,7 @@ ChatController 收到问题 + conversationId
 | 配置项 | 值 | 含义 |
 |--------|----|------|
 | `server.port` | 8081 | 后端端口 |
-| `spring.datasource.url` | `jdbc:mysql://localhost:3306/paismart` | ⚠ 注意：这里是 **paismart**，但 `docs/databases/ddl.sql` 建的是 **paimart**，两者不一致，首次启动建议统一 |
+| `spring.datasource.url` | `jdbc:mysql://localhost:3306/paismart` | 业务库名，需与 `docs/databases/ddl.sql` 创建的库一致（已统一为 paismart） |
 | `spring.jpa.hibernate.ddl-auto` | update | 启动时自动按实体更新表结构 |
 | `spring.data.redis` | localhost:6379 / PaiSmart2025 | 缓存 |
 | `spring.kafka.bootstrap-servers` | 127.0.0.1:9092 | 异步消息 |
@@ -435,7 +435,7 @@ ChatController 收到问题 + conversationId
 | `rerank.enabled` | true / gte-rerank-v2 / candidate-size=30 | 精排 |
 | `file.parsing.chunk-size` | 512 | 切块字符数 |
 
-> ⚠ **新手务必注意的坑**：`application.yml` 里 datasource 指向库 `paismart`，而 `ddl.sql` 创建的是 `paimart`。请二选一统一（推荐把 `ddl.sql` 与 datasource 都改成同一个，例如都用 `paismart`，或在导入 DDL 后手动 `CREATE DATABASE paismart` 并把表建进去），否则会因"库不存在 / 表不存在"启动失败。
+> ✓ 库名已统一为 `paismart`：`application.yml` 的 datasource 与 `docs/databases/ddl.sql` 创建的库名一致，执行 DDL 后可直接启动，无需额外处理。
 
 ---
 
@@ -460,7 +460,7 @@ cd frontend; pnpm install; pnpm dev
 ## 常见问题
 
 **Q1：后端启动报 `Could not create connection to database server`**
-→ MySQL 没起来或库没建。先 `docker ps` 看 mysql 是否 Up，再确认你执行过 `docs/databases/ddl.sql` 创建了 `paimart` 库。
+→ MySQL 没起来或库没建。先 `docker ps` 看 mysql 是否 Up，再确认你执行过 `docs/databases/ddl.sql` 创建了 `paismart` 库。
 
 **Q2：表不存在 / 字段缺失（编译或启动报找不到符号/未知列）**
 → 确认执行了 `docs/databases/ddl.sql`；或检查 `application.yml` 里 `ddl-auto` 是否为 `update`。
@@ -482,7 +482,7 @@ cd frontend; pnpm install; pnpm dev
 |------|------|------|
 | 前端 | 5173 | Vue 开发服务器 |
 | 后端 | 8081 | Spring Boot REST API |
-| MySQL | 3306 | 数据库（库名 paimart） |
+| MySQL | 3306 | 数据库（库名 paismart） |
 | Redis | 6379 | 缓存 |
 | Kafka | 9092 / 9093 | 消息队列 |
 | Elasticsearch | 9200 | 搜索 |
