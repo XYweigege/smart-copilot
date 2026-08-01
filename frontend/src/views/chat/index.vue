@@ -70,7 +70,7 @@ const currentTitle = computed(() => {
     <Transition name="slide">
       <div 
         v-if="chatStore.showHistorySidebar"
-        class="history-sidebar w-80 bg-white border-r border-gray-200 flex flex-col shadow-lg absolute left-0 top-0 h-full z-10 rounded-l-xl"
+        class="history-sidebar w-80 bg-white border-r border-gray-200 flex flex-col absolute left-0 top-0 h-full z-10 rounded-l-8px shadow-[1px_0_2px_rgba(15,23,42,0.05)]"
       >
         <!-- 侧边栏头部 -->
         <div class="p-4 border-b border-gray-200 flex items-center justify-between">
@@ -100,8 +100,8 @@ const currentTitle = computed(() => {
             <div
               v-for="conv in chatStore.conversationList"
               :key="conv.conversationId"
-              class="group p-3 rounded-lg border border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer"
-              :class="conv.conversationId === chatStore.conversationId ? 'bg-blue-50 border-blue-200' : ''"
+              class="group p-3 rounded-8px border border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer"
+              :class="conv.conversationId === chatStore.conversationId ? 'conv-item--active' : ''"
               @click="handleSwitchConversation(conv.conversationId)"
             >
               <!-- 标题与删除 -->
@@ -199,5 +199,11 @@ const currentTitle = computed(() => {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+/* 当前会话选中态：主色浅底，弱化写死蓝的炫光感 */
+.conv-item--active {
+  background-color: #eff6ff;
+  border-color: #bfdbfe;
 }
 </style>

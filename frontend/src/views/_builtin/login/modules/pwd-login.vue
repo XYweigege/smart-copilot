@@ -95,7 +95,7 @@ function handleAccountLogin(account: Account) {
       </NInput>
     </NFormItem>
     <div class="flex-col gap-6">
-      <NButton type="primary" size="large" round block :loading="authStore.loginLoading" @click="handleSubmit">
+      <NButton type="primary" size="large" block :loading="authStore.loginLoading" class="login-btn" @click="handleSubmit">
         {{ $t('page.login.common.login') }}
       </NButton>
       <NButton block @click="toggleLoginModule('register')">
@@ -119,4 +119,8 @@ function handleAccountLogin(account: Account) {
   </NForm>
 </template>
 
-<style scoped></style>
+<style scoped>
+.login-btn :deep(.n-button) {
+  border-radius: 8px;
+}
+</style>
