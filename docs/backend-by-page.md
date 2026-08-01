@@ -190,17 +190,38 @@ Kafka 消费者 (group=file-processing-group) 收到消息
 
 ### 5.1 混合检索 `GET /api/v1/search/hybrid?query=&topK=`
 
+检索后端 = `HybridSearchService`（`searchWithPermission`），核心思路是 **kNN 向量召回 + 关键词 must 过滤 + 权限 filter + BM25 rescore 重排 + 知识图谱融合**。一次 ES 查询里完成四件事：
+
 ```
 HybridSearchService.searchWithPermission(query, userId, orgTag, topK):
-  1. 向量召回：把 query 调 embedding → 向量，ES kNN 检索 dense_vector（取 TopN）
-  2. 关键词召回：IK 分词 query → ES match（取 TopN）
-  3. 融合（RRF / 加权）：合并两路结果，去重打分
-  4. 权限过滤：只保留 orgTag 匹配或 isPublic=true 的 chunk
-  5. 返回 SearchResult 列表：{ fileMd5, chunkId, textContent, score, userId, orgTag, isPublic }
+  0. 查用户有效组织标签 getUserEffectiveOrgTags（决定能看哪些文档）
+  1. 问题向量化：embedToVectorList(query) → queryVector（调 EmbeddingClient）
+  2. 一次 ES bool 查询内做四件事：
+     ① KNN 向量召回：knn field=vector queryVector=k cosine（recallK=topK*30 候选窗口）
+     ② 关键词 must：match(textContent=query) 走 IK 倒排索引（BM25），强制字面命中
+     ③ 权限 filter：自己(userId) OR 公开(isPublic) OR 所属组织(orgTag，含层级) 三层 should
+     ④ BM25 rescore：窗口内用关键词重排，queryWeight=0.2 / rescoreWeight=1.0（以关键词为主、语义为辅）
+  3. s.size(topK) 截取最终结果
+  4. fuseGraphResults：Neo4j 按实体关系找相关文档，ES 已有者 +图谱分*0.3 提升，无者作为补充，统一排序取 topK
+  5. 返回 SearchResult：{ fileMd5, chunkId, textContent, score, userId, orgTag, isPublic }
 ```
+
+ES 索引 `knowledge_base` 三类索引并存（见 `es-mappings/knowledge_base.json`）：
+
+| 字段 | 索引类型 | 用在这步 |
+|------|----------|----------|
+| `textContent`（IK 分词） | 倒排索引 | ② 关键词 must、④ BM25 rescore |
+| `fileMd5` / `orgTag`（keyword） | 倒排索引 | ③ 权限过滤 |
+| `vector`（`dense_vector` + `index:true` cosine） | 向量索引(HNSW) | ① KNN 召回 |
+
+**兜底机制**（保证向量服务挂了仍能检索）：
+- 向量生成失败 → 退化为 `textOnlySearchWithPermission`（纯 BM25 关键词 + 权限 filter + `minScore(0.3)` 阈值）。
+- 整个混合检索异常 → 再退化到纯文本搜索。
+- 注意：KNN 的 `k` 由配置 `elasticsearch.knn.k` 控制，默认覆盖在全量候选上。
 
 - 未带 userId 时走 `search()`（仅公开内容）。
 - `ElasticsearchService` 封装 ES Java Client 8.10 的查询构造（bool query + knn）。
+- **写入幂等**：`ElasticsearchService.bulkIndex` 用 `fileMd5_chunkId` 作为 ES 文档 `_id`，同一块重复写入会覆盖而非新增（避免重复文档）。
 
 ---
 

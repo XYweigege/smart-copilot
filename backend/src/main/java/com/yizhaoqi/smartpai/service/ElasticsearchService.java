@@ -35,12 +35,16 @@ public class ElasticsearchService {
             logger.info("开始批量索引文档到Elasticsearch，文档数量: {}", documents.size());
             
             // 将文档列表转换为批量操作列表，每个文档都对应一个索引操作
+            // 文档ID固定为 "fileMd5_chunkId"，保证同一文件同一语义块重复写入时覆盖而非新增，避免 ES 产生重复文档
             List<BulkOperation> bulkOperations = documents.stream()
-                    .map(doc -> BulkOperation.of(op -> op.index(idx -> idx
-                            .index("knowledge_base") // 指定索引名称
-                            .id(doc.getId()) // 使用文档的ID作为Elasticsearch中的文档ID
-                            .document(doc) // 将文档对象作为数据源
-                    )))
+                    .map(doc -> {
+                        String docId = doc.getFileMd5() + "_" + doc.getChunkId();
+                        return BulkOperation.of(op -> op.index(idx -> idx
+                                .index("knowledge_base") // 指定索引名称
+                                .id(docId) // 以 fileMd5_chunkId 作为 Elasticsearch 文档ID，幂等写入
+                                .document(doc) // 将文档对象作为数据源
+                        ));
+                    })
                     .toList();
 
             // 创建BulkRequest对象，并将批量操作列表添加到请求中
