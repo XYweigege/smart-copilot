@@ -100,12 +100,12 @@ cypress/screenshots/
 dump.sql
 
 # ==================== Application specific (敏感配置) ====================
-src/main/resources/application.yml
-src/main/resources/application.yml~
-src/main/resources/application-dev.yml
-src/main/resources/application-docker.yml
-src/main/resources/application-prod.yml
-src/main/resources/application-test.yml
+backend/src/main/resources/application.yml
+backend/src/main/resources/application.yml~
+backend/src/main/resources/application-dev.yml
+backend/src/main/resources/application-docker.yml
+backend/src/main/resources/application-prod.yml
+backend/src/main/resources/application-test.yml
 frontend/.env
 frontend/.env.prod
 frontend/.env.test

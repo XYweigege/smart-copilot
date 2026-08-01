@@ -45,7 +45,7 @@ docker-compose up -d
 Start-Sleep -Seconds 60
 
 # 5. 启动后端（新终端窗口）
-cd "项目路径"
+cd "项目路径/backend"
 mvn spring-boot:run
 
 # 6. 启动前端（新终端窗口）
@@ -98,7 +98,7 @@ docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 ### 第二步：启动后端服务
 
 #### 2.1 配置文件位置
-主配置文件：`src/main/resources/application.yml`
+主配置文件：`backend/src/main/resources/application.yml`
 
 **关键配置项：**
 ```yaml
@@ -140,12 +140,14 @@ deepseek:
 
 #### 2.2 编译项目
 ```bash
+cd backend
 mvn clean compile
 ```
 
 #### 2.3 启动后端
 ```bash
 # 开发模式
+cd backend
 mvn spring-boot:run
 
 # 或者后台运行（Windows）
@@ -244,11 +246,12 @@ Start-Process "C:\Program Files\Docker\Docker\Docker Desktop.exe"
 **症状：** `COMPILATION ERROR: 找不到符号`
 
 **常见原因及解决：**
-1. **缺少依赖类**：检查 `src/main/java/com/yizhaoqi/smartpai/service/` 目录下是否有被引用但未实现的类
+1. **缺少依赖类**：检查 `backend/src/main/java/com/yizhaoqi/smartpai/service/` 目录下是否有被引用但未实现的类
 2. **字段缺失**：检查实体类是否有必要的字段（如 `DocumentVector.parentChunkId`）
 
 **修复方法：**
 ```bash
+cd backend
 # 清理并重新编译
 mvn clean compile
 
@@ -356,7 +359,7 @@ docker-compose down
 docker restart mysql
 
 # 重启后端（先停止再启动）
-# 在后端终端按 Ctrl+C，然后重新执行 mvn spring-boot:run
+# 在后端终端按 Ctrl+C，然后重新执行 cd backend && mvn spring-boot:run
 ```
 
 ---
@@ -369,7 +372,7 @@ docker restart mysql
   ```bash
   # 使用 DevTools（如果 IDE 支持）可自动重启
   # 或手动执行：
-  mvn compile && # 然后 Ctrl+C 停止，再 mvn spring-boot:run
+  cd backend && mvn compile && # 然后 Ctrl+C 停止，再 mvn spring-boot:run
   ```
 
 ### 查看日志

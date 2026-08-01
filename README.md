@@ -61,7 +61,7 @@
 ### 后端
 
 ```
-src/main/java/com/yizhaoqi/smartpai/
+backend/src/main/java/com/yizhaoqi/smartpai/
 ├── SmartPaiApplication.java      # 主应用程序入口
 ├── client/                        # 外部API客户端（DeepSeek、Embedding、Rerank）
 ├── config/                        # 配置类（Security、Neo4j、Redis等）
@@ -123,7 +123,7 @@ docker compose up -d
 
 ### 2. 配置 API Key
 
-编辑 `src/main/resources/application.yml`，配置 AI 服务的 API Key：
+编辑 `backend/src/main/resources/application.yml`，配置 AI 服务的 API Key：
 
 ```yaml
 # 聊天服务 API（阿里云百炼）
@@ -149,6 +149,7 @@ rerank:
 ### 3. 启动后端
 
 ```bash
+cd backend
 mvn spring-boot:run
 ```
 
@@ -277,7 +278,7 @@ A: 请检查 API Key 配置是否正确，账户是否有足够额度。可通�
 
 ### Q: 如何修改默认端口？
 
-A: 编辑 `application.yml` 中的 `server.port` 配置。
+A: 编辑 `backend/src/main/resources/application.yml` 中的 `server.port` 配置。
 
 ## License
 

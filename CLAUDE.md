@@ -26,7 +26,7 @@ PaiSmart (派聪明) is an enterprise-grade AI knowledge management system built
 cd docs && docker-compose up -d
 
 # Backend
-mvn spring-boot:run
+cd backend && mvn spring-boot:run
 
 # Frontend
 cd frontend && pnpm install && pnpm dev
@@ -36,6 +36,8 @@ cd frontend && pnpm install && pnpm dev
 
 ### Backend (Spring Boot)
 ```bash
+cd backend
+
 # Run application
 mvn spring-boot:run
 
@@ -74,7 +76,7 @@ pnpm preview
 
 ### Backend Structure
 ```
-src/main/java/com/yizhaoqi/smartpai/
+backend/src/main/java/com/yizhaoqi/smartpai/
 ├── SmartPaiApplication.java      # Main application entry
 ├── client/                       # External API clients (DeepSeek, Embedding)
 ├── config/                       # Configuration classes (Security, JWT, etc.)
@@ -125,7 +127,7 @@ frontend/src/
 ## Configuration Files
 
 ### Backend Configuration
-- `application.yml`: Main configuration with database, Redis, Kafka, AI services
+- `backend/src/main/resources/application.yml`: Main configuration with database, Redis, Kafka, AI services
 - `application-dev.yml`: Development-specific settings
 - `application-docker.yml`: Docker deployment settings
 
@@ -172,7 +174,7 @@ The application uses MySQL as the primary database with JPA/Hibernate for ORM. K
 
 ### Frontend Development
 - Use Vue 3 Composition API with TypeScript
-- Follow established component patterns in `/src/components/`
+- Follow established component patterns in `frontend/src/components/`
 - Use Pinia for state management
 - Implement proper TypeScript types for API responses
 
@@ -180,6 +182,8 @@ The application uses MySQL as the primary database with JPA/Hibernate for ORM. K
 
 ### Backend Testing
 ```bash
+cd backend
+
 # Run all tests
 mvn test
 
@@ -207,7 +211,7 @@ pnpm build
 ### Docker Deployment
 ```bash
 # Build backend
-mvn clean package
+cd backend && mvn clean package
 
 # Build frontend
 cd frontend && pnpm build
