@@ -2,7 +2,7 @@ package com.yizhaoqi.smartpai.service;
 
 import com.yizhaoqi.smartpai.model.FileUpload;
 import com.yizhaoqi.smartpai.model.User;
-import com.yizhaoqi.smartpai.repository.DocumentVectorRepository;
+import com.yizhaoqi.smartpai.repository.DocumentChunkRepository;
 import com.yizhaoqi.smartpai.repository.FileUploadRepository;
 import com.yizhaoqi.smartpai.repository.UserRepository;
 import io.minio.GetObjectArgs;
@@ -36,7 +36,7 @@ public class DocumentService {
     private FileUploadRepository fileUploadRepository;
 
     @Autowired
-    private DocumentVectorRepository documentVectorRepository;
+    private DocumentChunkRepository documentChunkRepository;
 
     @Autowired
     private MinioClient minioClient;
@@ -54,7 +54,7 @@ public class DocumentService {
      * 删除文档及其相关数据
      * 该方法将删除:
      * 1. FileUpload记录
-     * 2. DocumentVector记录
+     * 2. DocumentChunk记录
      * 3. MinIO中的文件
      * 4. Elasticsearch中的向量数据
      *
@@ -106,9 +106,9 @@ public class DocumentService {
                 }
             }
             
-            // 3. 删除DocumentVector记录
+            // 3. 删除DocumentChunk记录
             try {
-                documentVectorRepository.deleteByFileMd5(fileMd5);
+                documentChunkRepository.deleteByFileMd5(fileMd5);
                 logger.info("成功删除文档向量记录: {}", fileMd5);
             } catch (Exception e) {
                 logger.error("删除文档向量记录时出错: {}", fileMd5, e);

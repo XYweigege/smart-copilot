@@ -165,7 +165,7 @@ Kafka 消费者 (group=file-processing-group) 收到消息
       - 得到每个 chunk 的向量
    5. 写入：
       - Elasticsearch：chunk + 向量(dense_vector) + 关键词（IK 分词）
-      - MySQL：chunk_info / document_vectors
+      - MySQL：chunk_info / document_chunks
    6. 可选：knowledge-graph.enabled=true 时抽取关系 → Neo4j
 → 失败：消息进死信队列 file-processing-dlt，可重放
 ```

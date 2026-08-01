@@ -247,7 +247,7 @@ Start-Process "C:\Program Files\Docker\Docker\Docker Desktop.exe"
 
 **常见原因及解决：**
 1. **缺少依赖类**：检查 `backend/src/main/java/com/yizhaoqi/smartpai/service/` 目录下是否有被引用但未实现的类
-2. **字段缺失**：检查实体类是否有必要的字段（如 `DocumentVector.parentChunkId`）
+2. **字段缺失**：检查实体类是否有必要的字段（如 `DocumentChunk.parentChunkId`）
 
 **修复方法：**
 ```bash

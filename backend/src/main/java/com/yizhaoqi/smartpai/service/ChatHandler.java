@@ -5,8 +5,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yizhaoqi.smartpai.client.DeepSeekClient;
 import com.yizhaoqi.smartpai.entity.SearchResult;
-import com.yizhaoqi.smartpai.model.DocumentVector;
-import com.yizhaoqi.smartpai.repository.DocumentVectorRepository;
+import com.yizhaoqi.smartpai.model.DocumentChunk;
+import com.yizhaoqi.smartpai.repository.DocumentChunkRepository;
 import com.yizhaoqi.smartpai.service.ConversationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,7 +41,7 @@ public class ChatHandler {
     private final RedisTemplate<String, String> redisTemplate;
     private final HybridSearchService searchService;
     private final DeepSeekClient deepSeekClient;
-    private final DocumentVectorRepository documentVectorRepository;
+    private final DocumentChunkRepository documentChunkRepository;
     private final ConversationSummaryService conversationSummaryService;
     private final ConversationService conversationService;
     private final ObjectMapper objectMapper;
@@ -60,13 +60,13 @@ public class ChatHandler {
     public ChatHandler(RedisTemplate<String, String> redisTemplate,
                       HybridSearchService searchService,
                       DeepSeekClient deepSeekClient,
-                      DocumentVectorRepository documentVectorRepository,
+                      DocumentChunkRepository documentChunkRepository,
                       ConversationSummaryService conversationSummaryService,
                       ConversationService conversationService) {
         this.redisTemplate = redisTemplate;
         this.searchService = searchService;
         this.deepSeekClient = deepSeekClient;
-        this.documentVectorRepository = documentVectorRepository;
+        this.documentChunkRepository = documentChunkRepository;
         this.conversationSummaryService = conversationSummaryService;
         this.conversationService = conversationService;
         this.objectMapper = new ObjectMapper();
@@ -597,7 +597,7 @@ public class ChatHandler {
 
         try {
             // 查询该 chunk 的 parentChunkId
-            DocumentVector chunk = documentVectorRepository.findByFileMd5AndChunkId(fileMd5, chunkId);
+            DocumentChunk chunk = documentChunkRepository.findByFileMd5AndChunkId(fileMd5, chunkId);
             if (chunk == null || chunk.getParentChunkId() == null) {
                 // 没有父块信息，返回原始内容
                 return chunk != null ? truncateText(chunk.getTextContent(), maxLen) : "";
@@ -606,7 +606,7 @@ public class ChatHandler {
             Integer parentChunkId = chunk.getParentChunkId();
 
             // 查询同一父块的所有子切片
-            List<DocumentVector> siblingChunks = documentVectorRepository
+            List<DocumentChunk> siblingChunks = documentChunkRepository
                     .findByFileMd5AndParentChunkId(fileMd5, parentChunkId);
 
             if (siblingChunks.isEmpty()) {
@@ -616,7 +616,7 @@ public class ChatHandler {
             // 按 chunkId 排序并合并文本
             siblingChunks.sort((a, b) -> Integer.compare(a.getChunkId(), b.getChunkId()));
             StringBuilder parentContent = new StringBuilder();
-            for (DocumentVector sibling : siblingChunks) {
+            for (DocumentChunk sibling : siblingChunks) {
                 if (sibling.getTextContent() != null) {
                     if (parentContent.length() > 0) {
                         parentContent.append("\n\n");
@@ -634,7 +634,7 @@ public class ChatHandler {
             logger.warn("获取父块内容失败，降级使用原始内容: fileMd5={}, chunkId={}", fileMd5, chunkId, e);
             // 降级：查询原始 chunk 内容
             try {
-                DocumentVector chunk = documentVectorRepository.findByFileMd5AndChunkId(fileMd5, chunkId);
+                DocumentChunk chunk = documentChunkRepository.findByFileMd5AndChunkId(fileMd5, chunkId);
                 return chunk != null ? truncateText(chunk.getTextContent(), maxLen) : "";
             } catch (Exception ex) {
                 return "";

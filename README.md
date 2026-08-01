@@ -60,7 +60,7 @@ mysql -h 127.0.0.1 -P 3306 -u root -pPaiSmart2025 < docs/databases/ddl.sql
 执行成功后会创建以下库和表：
 
 - 数据库：`paismart`
-- 表：`users`（用户）、`organization_tags`（组织标签）、`file_upload`（文件上传记录）、`chunk_info`（分块信息）、`document_vectors`（文档向量）、`conversations`（对话历史）
+- 表：`users`（用户）、`organization_tags`（组织标签）、`file_upload`（文件上传记录）、`chunk_info`（分块信息）、`document_chunks`（文档切块，原名 document_vectors）、`conversations`（对话历史）
 
 ### 2.2 初始化管理员账号（可选但推荐）
 
@@ -275,7 +275,7 @@ PaiSmart 的本质是一个 **RAG（Retrieval-Augmented Generation，检索增�
 Spring Boot 后端 (8081) ── com.yizhaoqi.smartpai
    controller  →  service  →  mapper(JPA/MyBatis)  →  entity
         │
-        ├─ MySQL        业务数据：users / file_upload / chunk_info / document_vectors / conversations
+        ├─ MySQL        业务数据：users / file_upload / chunk_info / document_chunks / conversations
         ├─ Redis        会话上下文缓存、限流
         ├─ Kafka        file-processing 主题（异步文档解析，带事务 + 死信队列 DLT）
         ├─ Elasticsearch 混合检索索引 + IK 中文分词
@@ -307,7 +307,7 @@ Spring Boot 后端 (8081) ── com.yizhaoqi.smartpai
 | 文档解析 | `tika-core` + `tika-parsers-standard-package 2.9.1` | 提取各格式文本 |
 | 中文分词 | `hanlp portable-1.8.6` | 关键词抽取、图谱实体识别 |
 | 工具 | `lombok 1.18.30`、`gson 2.10.1`、`commons-codec`、`commons-io` | Lombok 简化实体；MD5 校验等 |
-| WebSocket | `spring-boot-starter-websocket` | 问答结果流式推送（SSE/WS） |
+| WebSocket | `spring-boot-starter-websocket` | 问答结果流式推送（双向，支持停止指令） |
 | 校验 | `spring-boot-starter-validation` | 入参校验 |
 
 ### 7.4 前端技术栈（精确到依赖）
@@ -346,7 +346,7 @@ PaiSmart-main/
 │       ├── java/com/yizhaoqi/smartpai/
 │       │   ├── controller/   # 接口层
 │       │   │   ├── AuthController          # 登录/注册/登出（JWT 签发）
-│       │   │   ├── ChatController          # 问答对话（SSE/WS 流式）
+│       │   │   ├── ChatController          # 问答对话（遗留 WebSocket 实现，已弃用，见 Q6）
 │       │   │   ├── DocumentController       # 知识库/文档管理
 │       │   │   ├── UploadController         # 文件上传（写 MinIO + 发 Kafka）
 │       │   │   ├── ConversationController   # 会话历史
@@ -394,7 +394,7 @@ UploadController 接收文件
   → HanLP 抽取关键词/实体
   → Embedding API (text-embedding-v4, dim=2048) 向量化
   → 写入 Elasticsearch（chunk + 向量 + 关键词）
-  → 写 MySQL（file_upload / chunk_info / document_vectors）
+  → 写 MySQL（file_upload / chunk_info / document_chunks）
   → 可选：抽取关系写入 Neo4j（knowledge-graph.enabled=true）
   ⚠ 失败则进死信队列 file-processing-dlt，可重放
 ```
@@ -409,7 +409,7 @@ ChatController 收到问题 + conversationId
   → Rerank 精排 gte-rerank-v2 取 TopK              [rerank.enabled]
   → 按 ai.prompt.rules 拼 Prompt（结论先行 + 标注来源）
   → WebClient 调 LLM (temperature=0.3, max-tokens=2000)
-  → 通过 WebSocket/SSE 流式返回前端
+  → 通过 WebSocket 流式返回前端（双向，支持停止生成）
   → 落库 conversations 表
 ```
 
@@ -473,6 +473,17 @@ cd frontend; pnpm install; pnpm dev
 
 **Q5：AI 问答报错**
 → 多半是 `application.yml` 里 `deepseek.api.key` 没填真实 Key。
+
+**Q6：聊天为什么用 WebSocket 而不是 SSE？**
+→ 因为问答场景需要**双向通信**，而 SSE 只能服务器→客户端单向推送。具体三个原因：
+
+1. **需要主动"停止"生成**：前端在 AI 回复过程中，发送按钮会变成「停止」按钮（`frontend/src/views/chat/modules/input-box.vue`），通过 `wsSend({type:'stop', _internal_cmd_token})` 向服务器回传停止指令，后端 `ChatWebSocketHandler` 收到后调用 `chatHandler.stopResponse` 中断流式输出。SSE 是只读通道，要实现停止必须额外再开一个 HTTP 接口，而 WebSocket 一条连接就搞定收发。
+2. **同一通道收发问答**：用户提问（`processMessage`）和服务器流式推送（token 逐字返回）走的是同一个 `WebSocketSession`，连接天然支持双向。
+3. **连接即可携带鉴权与会话参数**：路由 `/chat/{token}` 把 JWT 放在路径里（`ChatWebSocketHandler.extractUserId`），连接时还能带 `?conversationId=xxx` 实现「继续聊天」切换会话。
+
+> 选择对照：如果只是一个纯「服务器推送、客户端不回传控制指令」的场景（通知、行情），SSE 更轻量。但本项目是带「中途打断」的流式对话，真正的全双工更合适。
+>
+> 备注：当前生效的是 `ChatWebSocketHandler`（`/chat/{token}`），见 `WebSocketConfig`。`ChatController` 里有一段遗留的 `extends TextWebSocketHandler` 旧实现（用 session id 作 userId、无鉴权），未被注册，建议后续清理避免混淆。
 
 ---
 

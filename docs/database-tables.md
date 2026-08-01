@@ -106,13 +106,13 @@ INSERT INTO chunk_info (file_md5, chunk_index, chunk_md5, storage_path) VALUES
 ```
 > 含义：《公司制度手册.pdf》被切成 3 块，分别存在 MinIO 的对应路径。
 
-**在系统里怎么用**：`UploadService.mergeChunks` 记录分片；`ParseService` 按块从 MinIO 取出内容做 Tika 解析与切块（注意：此处是上传阶段的物理分片，与下文 `document_vectors` 的"语义切块"是不同维度）。
+**在系统里怎么用**：`UploadService.mergeChunks` 记录分片；`ParseService` 按块从 MinIO 取出内容做 Tika 解析与切块（注意：此处是上传阶段的物理分片，与下文 `document_chunks` 的"语义切块"是不同维度）。
 
 ---
 
-## 5. document_vectors —— 文档向量存储表
+## 5. document_chunks —— 文档切块存储表（原名 document_vectors）
 
-**用途**：这是**检索的核心表**。文档解析后按语义切块（默认 512 字符/块），每块文本 + 它的向量一并存这里（真正被 ES 索引的源数据也来自这里）。
+**用途**：这是**检索时的原文存根表**。文档解析后按语义切块（默认 512 字符/块），每块的**原文文本 + 权限/溯源元数据**存在这里；真正的向量存在 **Elasticsearch** 的 `dense_vector` 字段（本表不存向量）。ES 负责"检索定位"，本表负责"检索后取回原文、扩展上下文、抽图谱"。
 
 **关键字段**
 | 字段 | 说明 |
@@ -127,12 +127,12 @@ INSERT INTO chunk_info (file_md5, chunk_index, chunk_md5, storage_path) VALUES
 
 **示例**
 ```sql
-INSERT INTO document_vectors (file_md5, chunk_id, text_content, model_version, user_id, org_tag, is_public)
+INSERT INTO document_chunks (file_md5, chunk_id, text_content, model_version, user_id, org_tag, is_public)
 VALUES ('3e25960a79dbc69b674cd4ec67a72c62', 0,
         '年假申请需在钉钉提交，提前 3 个工作日审批。',
         'text-embedding-v4', 'zhangsan', 'hr', 0);
 ```
-> 含义：手册第 0 块内容是"年假申请规则"。它的向量（2048 维）存在 ES 的 `dense_vector` 字段；`org_tag=hr` 保证只有 HR 组织用户能搜到。
+> 含义：手册第 0 块内容是"年假申请规则"。它的向量（2048 维）存在 ES 的 `dense_vector` 字段；`org_tag=hr` 保证只有 HR 组织用户能搜到。本表只存原文与元数据，不存向量。
 
 **在系统里怎么用**：`ParseService` 调 `VectorizationService` 向量化后写入；`HybridSearchService` 召回时，用 `org_tag`/`is_public` 过滤，再把 `text_content` 作为上下文喂给 LLM（见后端文档 §2、§5）。
 
@@ -175,15 +175,15 @@ users (1) ──< conversations (n)      一个用户有多条对话
 users (1) ──< organization_tags (n)  一个用户可创建多个组织标签
 
 file_upload (1) ──< chunk_info (n)       一个文件切成多个物理块
-file_upload (1) ──< document_vectors (n) 一个文件生成多个语义向量块
+file_upload (1) ──< document_chunks (n) 一个文件生成多个语义切块
 
 organization_tags (1) ──< organization_tags (n)  自引用，形成组织树
 users.org_tags  ── 引用 ──> organization_tags.tag_id   （逗号分隔的多个 tag）
-file_upload.org_tag / document_vectors.org_tag ── 引用 ──> organization_tags.tag_id
+file_upload.org_tag / document_chunks.org_tag ── 引用 ──> organization_tags.tag_id
 ```
 
 **贯穿全局的线索是 `file_md5`**：
-`file_upload` → `chunk_info` → `document_vectors` 三张表都用它串联同一份文档；而 `org_tag` 是贯穿 `users` / `file_upload` / `document_vectors` 的**权限隔离键**。
+`file_upload` → `chunk_info` → `document_chunks` 三张表都用它串联同一份文档；而 `org_tag` 是贯穿 `users` / `file_upload` / `document_chunks` 的**权限隔离键**。
 
 ---
 

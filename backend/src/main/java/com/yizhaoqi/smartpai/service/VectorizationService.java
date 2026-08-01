@@ -1,10 +1,10 @@
 package com.yizhaoqi.smartpai.service;
 
 import com.yizhaoqi.smartpai.client.EmbeddingClient;
-import com.yizhaoqi.smartpai.model.DocumentVector;
+import com.yizhaoqi.smartpai.model.DocumentChunk;
 import com.yizhaoqi.smartpai.entity.EsDocument;
 import com.yizhaoqi.smartpai.entity.TextChunk;
-import com.yizhaoqi.smartpai.repository.DocumentVectorRepository;
+import com.yizhaoqi.smartpai.repository.DocumentChunkRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,7 +27,7 @@ public class VectorizationService {
     private ElasticsearchService elasticsearchService;
 
     @Autowired
-    private DocumentVectorRepository documentVectorRepository;
+    private DocumentChunkRepository documentChunkRepository;
 
     /**
      * 执行向量化操作
@@ -89,13 +89,13 @@ public class VectorizationService {
     // 从数据库获取分块内容
     private List<TextChunk> fetchTextChunks(String fileMd5) {
         // 调用 Repository 查询数据
-        List<DocumentVector> vectors = documentVectorRepository.findByFileMd5(fileMd5);
+        List<DocumentChunk> chunks = documentChunkRepository.findByFileMd5(fileMd5);
 
         // 转换为 TextChunk 列表
-        return vectors.stream()
-                .map(vector -> new TextChunk(
-                        vector.getChunkId(),
-                        vector.getTextContent()
+        return chunks.stream()
+                .map(chunk -> new TextChunk(
+                        chunk.getChunkId(),
+                        chunk.getTextContent()
                 ))
                 .toList();
     }

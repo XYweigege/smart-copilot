@@ -50,8 +50,8 @@ CREATE TABLE chunk_info (
     storage_path VARCHAR(255) NOT NULL COMMENT '分块在存储系统中的路径'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文件分块信息表';
 
-CREATE TABLE document_vectors (
-    vector_id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '向量记录唯一标识',
+CREATE TABLE document_chunks (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '切块记录唯一标识（仅自增主键，无业务含义）',
     file_md5 VARCHAR(32) NOT NULL COMMENT '关联的文件MD5值',
     chunk_id INT NOT NULL COMMENT '文本分块序号',
     text_content TEXT COMMENT '文本内容',
@@ -59,7 +59,16 @@ CREATE TABLE document_vectors (
     user_id VARCHAR(64) NOT NULL COMMENT '上传用户ID',
     org_tag VARCHAR(50) COMMENT '文件所属组织标签',
     is_public TINYINT(1) NOT NULL DEFAULT 0 COMMENT '文件是否公开'
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文档向量存储表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文档切块存储表（原名 document_vectors，仅存切块原文+元数据，向量存于 Elasticsearch）';
+
+-- ============================================================================
+-- 迁移脚本（仅用于【已存在数据】的数据库，全新库可直接用上面的 CREATE）
+-- 旧表名为 document_vectors，现统一改名为 document_chunks（表重命名，不改动数据）
+-- 同时把旧的自增主键列 vector_id 改名为 id。
+-- 注意：执行前请先备份；建议在低峰期运行。MySQL 5.6+ / 8.0 均支持 RENAME / CHANGE。
+-- ============================================================================
+RENAME TABLE document_vectors TO document_chunks;
+ALTER TABLE document_chunks CHANGE vector_id id BIGINT AUTO_INCREMENT COMMENT '切块记录唯一标识（仅自增主键，无业务含义）';
 
 CREATE TABLE conversations (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '对话记录唯一标识',

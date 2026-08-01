@@ -1,7 +1,7 @@
 package com.yizhaoqi.smartpai.service;
 
-import com.yizhaoqi.smartpai.model.DocumentVector;
-import com.yizhaoqi.smartpai.repository.DocumentVectorRepository;
+import com.yizhaoqi.smartpai.model.DocumentChunk;
+import com.yizhaoqi.smartpai.repository.DocumentChunkRepository;
 import org.apache.tika.exception.TikaException;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.parser.ParseContext;
@@ -26,7 +26,7 @@ public class ParseService {
     private static final Logger logger = LoggerFactory.getLogger(ParseService.class);
 
     @Autowired
-    private DocumentVectorRepository documentVectorRepository;
+    private DocumentChunkRepository documentChunkRepository;
 
     @Value("${file.parsing.chunk-size}")
     private int chunkSize;
@@ -182,14 +182,14 @@ public class ParseService {
         int currentChunkId = startingChunkId;
         for (String chunk : chunks) {
             currentChunkId++;
-            var vector = new DocumentVector();
-            vector.setFileMd5(fileMd5);
-            vector.setChunkId(currentChunkId);
-            vector.setTextContent(chunk);
-            vector.setUserId(userId);
-            vector.setOrgTag(orgTag);
-            vector.setPublic(isPublic);
-            documentVectorRepository.save(vector);
+            var chunkEntity = new DocumentChunk();
+            chunkEntity.setFileMd5(fileMd5);
+            chunkEntity.setChunkId(currentChunkId);
+            chunkEntity.setTextContent(chunk);
+            chunkEntity.setUserId(userId);
+            chunkEntity.setOrgTag(orgTag);
+            chunkEntity.setPublic(isPublic);
+            documentChunkRepository.save(chunkEntity);
         }
         logger.info("成功保存 {} 个子切片到数据库", chunks.size());
         return currentChunkId;

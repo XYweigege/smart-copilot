@@ -1,8 +1,8 @@
 package com.yizhaoqi.smartpai.service;
 
 import com.hankcs.hanlp.HanLP;
-import com.yizhaoqi.smartpai.model.DocumentVector;
-import com.yizhaoqi.smartpai.repository.DocumentVectorRepository;
+import com.yizhaoqi.smartpai.model.DocumentChunk;
+import com.yizhaoqi.smartpai.repository.DocumentChunkRepository;
 import org.neo4j.driver.Driver;
 import org.neo4j.driver.Record;
 import org.neo4j.driver.Result;
@@ -32,7 +32,7 @@ public class KnowledgeGraphService {
     private final Driver neo4jDriver;
 
     @Autowired
-    private DocumentVectorRepository documentVectorRepository;
+    private DocumentChunkRepository documentChunkRepository;
 
     @Value("${knowledge-graph.enabled:true}")
     private boolean enabled;
@@ -250,18 +250,18 @@ public class KnowledgeGraphService {
 
         try {
             // 从数据库读取该文件的所有分块内容
-            List<DocumentVector> vectors = documentVectorRepository.findByFileMd5(fileMd5);
-            if (vectors == null || vectors.isEmpty()) {
+            List<DocumentChunk> chunks = documentChunkRepository.findByFileMd5(fileMd5);
+            if (chunks == null || chunks.isEmpty()) {
                 logger.warn("未找到分块内容，跳过图谱构建，fileMd5: {}", fileMd5);
                 return;
             }
 
             // 合并所有分块文本
-            String fullText = vectors.stream()
-                    .map(DocumentVector::getTextContent)
+            String fullText = chunks.stream()
+                    .map(DocumentChunk::getTextContent)
                     .collect(Collectors.joining("\n"));
 
-            logger.info("从 {} 个分块合并文本，总长度: {}，fileMd5: {}", vectors.size(), fullText.length(), fileMd5);
+            logger.info("从 {} 个分块合并文本，总长度: {}，fileMd5: {}", chunks.size(), fullText.length(), fileMd5);
 
             // 构建知识图谱
             buildGraph(fileMd5, fullText, userId, orgTag);
