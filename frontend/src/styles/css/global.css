@@ -11,3 +11,63 @@ body,
 html {
   overflow-x: hidden;
 }
+
+/*
+ * 全局基础样式优化：弱化“AI/炫技”观感，呈现更克制、专业的传统企业后台风格。
+ * 仅作用于基础视觉变量，不侵入业务组件，减少人工干预。
+ */
+
+:root {
+  /* 统一的卡片/容器圆角，避免过大或花哨的圆角 */
+  --app-radius: 8px;
+  --app-radius-sm: 6px;
+  /* 更柔和、克制的阴影与边框 */
+  --app-border-color: rgba(15, 23, 42, 0.08);
+  --app-card-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+body {
+  /* 更清晰的默认字号与字重，弱化“细弱”的科技感字体 */
+  font-size: 14px;
+  color: rgb(28, 30, 33);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: 0.01em;
+}
+
+/* 统一内容卡片的圆角与边框，弱化浮夸阴影 */
+.n-card,
+.n-modal,
+.n-popover,
+.n-dropdown,
+.n-drawer {
+  border-radius: var(--app-radius) !important;
+  border-color: var(--app-border-color) !important;
+}
+
+.n-card {
+  box-shadow: var(--app-card-shadow) !important;
+}
+
+/* 主按钮保持沉稳，去掉过亮的高光 */
+.n-button:not(.n-button--tertiary):not(.n-button--quaternary):not(.n-button--text) {
+  border-radius: var(--app-radius-sm) !important;
+  font-weight: 500;
+}
+
+/* 输入框更克制 */
+.n-input,
+.n-base-selection {
+  border-radius: var(--app-radius-sm) !important;
+}
+
+/* 表格头部更清晰 */
+.n-data-table-thead th {
+  font-weight: 600;
+  color: rgb(71, 76, 82);
+}
+
+/* 弱化菜单 hover 的强对比高光，改为轻微底色 */
+.n-menu .n-menu-item-content::before {
+  border-radius: var(--app-radius-sm) !important;
+}

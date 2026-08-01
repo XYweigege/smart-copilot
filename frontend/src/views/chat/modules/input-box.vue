@@ -60,9 +60,15 @@ const handleSend = async () => {
     status: 'pending'
   });
   input.value.message = '';
+  nextTick(() => inputRef.value?.focus());
 };
 
 const inputRef = ref();
+// 清空输入框
+const handleClear = () => {
+  input.value.message = '';
+  inputRef.value?.focus();
+};
 // 手动插入换行符（确保所有浏览器兼容）
 const insertNewline = () => {
   const textarea = inputRef.value;
@@ -103,11 +109,23 @@ const handShortcut = (e: KeyboardEvent) => {
       @keydown="handShortcut"
     />
     <div class="flex items-center justify-between pt-2">
-      <div class="flex items-center text-18px color-gray-500">
+      <div class="flex items-center gap-3 text-18px color-gray-500">
         <NText class="text-14px">连接状态：</NText>
         <icon-eos-icons:loading v-if="wsStatus === 'CONNECTING'" class="color-yellow" />
         <icon-fluent:plug-connected-checkmark-20-filled v-else-if="wsStatus === 'OPEN'" class="color-green" />
         <icon-tabler:plug-connected-x v-else class="color-red" />
+        <NButton
+          v-if="input.message"
+          quaternary
+          size="small"
+          class="ml-2"
+          @click="handleClear"
+        >
+          <template #icon>
+            <icon-material-symbols:close-small-outline />
+          </template>
+          清空
+        </NButton>
       </div>
       <NButton :disabled="sendable" strong circle type="primary" @click="handleSend">
         <template #icon>

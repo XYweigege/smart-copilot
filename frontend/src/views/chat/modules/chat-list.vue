@@ -11,6 +11,9 @@ defineOptions({
 const chatStore = useChatStore();
 const { list, sessionId } = storeToRefs(chatStore);
 
+// 提供消息索引给子组件，用于单条删除
+provide('messageIndex', ref(-1));
+
 const loading = ref(false);
 const scrollbarRef = ref<InstanceType<typeof NScrollbar>>();
 
@@ -47,6 +50,26 @@ async function getList() {
   loading.value = false;
 }
 
+// 删除单条消息
+function handleDelete(index?: number) {
+  if (typeof index === 'number' && index >= 0) {
+    list.value.splice(index, 1);
+  }
+}
+
+// 重新生成：移除当前助手消息，用上一条用户消息重新提问
+function handleRegenerate() {
+  const last = list.value[list.value.length - 1];
+  if (last?.role === 'assistant') {
+    list.value.pop();
+  }
+  const userMsg = [...list.value].reverse().find(m => m.role === 'user');
+  if (userMsg) {
+    chatStore.wsSend(userMsg.content);
+    list.value.push({ content: '', role: 'assistant', status: 'pending' });
+  }
+}
+
 onMounted(() => {
   chatStore.scrollToBottom = scrollToBottom;
 });
@@ -66,7 +89,15 @@ onMounted(() => {
       </Teleport>
       <NSpin :show="loading">
         <VueMarkdownItProvider>
-          <ChatMessage v-for="(item, index) in list" :key="index" :msg="item" :session-id="sessionId" />
+          <ChatMessage
+            v-for="(item, index) in list"
+            :key="index"
+            :msg="item"
+            :session-id="sessionId"
+            :index="index"
+            @delete="handleDelete"
+            @regenerate="handleRegenerate"
+          />
         </VueMarkdownItProvider>
       </NSpin>
     </NScrollbar>

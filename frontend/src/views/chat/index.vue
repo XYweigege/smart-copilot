@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { useChatStore } from '@/store/modules/chat';
 import ChatList from './modules/chat-list.vue';
 import InputBox from './modules/input-box.vue';
@@ -55,6 +56,12 @@ function formatTime(dateStr: string): string {
   
   return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
 }
+
+// 当前会话标题（从历史会话列表中匹配 conversationId）
+const currentTitle = computed(() => {
+  const current = chatStore.conversationList.find(c => c.conversationId === chatStore.conversationId);
+  return current?.title || (chatStore.list.length ? '当前会话' : '新会话');
+});
 </script>
 
 <template>
@@ -125,7 +132,8 @@ function formatTime(dateStr: string): string {
         <div class="p-4 border-t border-gray-200">
           <button
             @click="handleNewConversation"
-            class="w-full px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors duration-200 text-sm font-medium"
+            class="w-full px-4 py-2 text-white rounded-lg transition-colors duration-200 text-sm font-medium"
+            style="background-color: #2563eb"
           >
             新建会话
           </button>
@@ -147,11 +155,18 @@ function formatTime(dateStr: string): string {
           </svg>
           历史记录
         </button>
-        
+
+        <!-- 当前会话标题 -->
+        <div class="flex items-center gap-2 text-gray-600 min-w-0 flex-1 justify-center px-4">
+          <icon-material-symbols:chat-bubble-outline class="text-4 flex-shrink-0" />
+          <span class="text-4 font-medium truncate">{{ currentTitle }}</span>
+        </div>
+
         <!-- 新会话按钮 -->
         <button
           @click="handleNewConversation"
-          class="flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors duration-200 text-sm font-medium shadow-sm hover:shadow-md"
+          class="flex items-center gap-2 px-4 py-2 text-white rounded-lg transition-colors duration-200 text-sm font-medium shadow-sm hover:shadow-md"
+          style="background-color: #2563eb"
         >
           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
