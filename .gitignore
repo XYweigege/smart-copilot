@@ -114,6 +114,9 @@ frontend/!.vscode/settings.json
 frontend/!.vscode/extensions.json
 frontend/!.vscode/launch.json
 
+# ==================== Runtime logs ====================
+runtime-logs/
+
 # ==================== MinIO / Docker ====================
 minio-data/
 docker-data/
