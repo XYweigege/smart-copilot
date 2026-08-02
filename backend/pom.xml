@@ -52,6 +52,7 @@
             <artifactId>spring-boot-starter-websocket</artifactId>
         </dependency>
         <!-- WebClient for DeepSeek API -->
+        <!-- 主要是为了用 WebClient —— Spring 提供的响应式 HTTP 客户端，用来对外发 HTTP 请求（而不是接收请求 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webflux</artifactId>
@@ -62,6 +63,7 @@
             <artifactId>mysql-connector-j</artifactId>
             <scope>runtime</scope>
         </dependency>
+        <!-- Java 里实体类总要写一堆重复代码：getter、setter、toString()、equals()、hashCode()、构造函数……Lombok 用注解在编译期自动生成这些，你不用手写。 -->
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
@@ -72,6 +74,8 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!-- <scope>test</scope> 说明它只在测试代码里用，不会进生产包。作用是：在写单元测试/集成测试时，模拟登录用户、角色、权限，方便测试那些有安全拦截（Spring Security）的接口。 -->
         <dependency>
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-test</artifactId>
@@ -117,6 +121,10 @@
             <version>1.16.1</version>
         </dependency>
         <!-- Apache Tika -->
+        <!-- Apache Tika 是文件内容检测和解析工具包。核心能力有两个：
+
+文件类型检测 —— 不管文件后缀名改成啥（.txt 改成 .pdf），Tika 能根据文件头字节（magic bytes）识别出真实 MIME 类型（如 application/pdf、image/png）。
+文本内容提取 —— 从各种格式文件里抽出纯文本：PDF、Word、Excel、PPT、HTML、CSV、图片里的文字（配合 tika-parsers + OCR）等 -->
         <dependency>
             <groupId>org.apache.tika</groupId>
             <artifactId>tika-core</artifactId>

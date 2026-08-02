@@ -100,25 +100,35 @@ const handShortcut = (e: KeyboardEvent) => {
 </script>
 
 <template>
-  <div class="relative w-full b-1 b-#1c1c1c20 bg-#fff p-4 card-wrapper dark:bg-#1c1c1c">
+  <div class="ui-card ui-surface relative w-full p-3">
     <textarea
       ref="inputRef"
       v-model.trim="input.message"
-      placeholder="给 派聪明 发送消息"
-      class="min-h-10 w-full cursor-text resize-none b-none bg-transparent color-#333 caret-[rgb(var(--primary-color))] outline-none dark:color-#f1f1f1"
+      placeholder="给 派聪明 发送消息，Enter 发送 / Shift+Enter 换行"
+      class="min-h-12 w-full cursor-text resize-none border-none bg-transparent text-4 leading-relaxed color-#333 caret-[rgb(var(--primary-color))] outline-none dark:color-#f1f1f1"
       @keydown="handShortcut"
     />
     <div class="flex items-center justify-between pt-2">
-      <div class="flex items-center gap-3 text-18px color-gray-500">
-        <NText class="text-14px">连接状态：</NText>
-        <icon-eos-icons:loading v-if="wsStatus === 'CONNECTING'" class="color-yellow" />
-        <icon-fluent:plug-connected-checkmark-20-filled v-else-if="wsStatus === 'OPEN'" class="color-green" />
-        <icon-tabler:plug-connected-x v-else class="color-red" />
+      <div class="flex items-center gap-3">
+        <!-- 连接状态徽标 -->
+        <NTag
+          round
+          size="small"
+          :bordered="false"
+          :type="wsStatus === 'OPEN' ? 'success' : wsStatus === 'CONNECTING' ? 'warning' : 'error'"
+        >
+          <template #icon>
+            <icon-eos-icons:loading v-if="wsStatus === 'CONNECTING'" />
+            <icon-fluent:plug-connected-checkmark-20-filled v-else-if="wsStatus === 'OPEN'" />
+            <icon-tabler:plug-connected-x v-else />
+          </template>
+          {{ wsStatus === 'OPEN' ? '已连接' : wsStatus === 'CONNECTING' ? '连接中' : '已断开' }}
+        </NTag>
         <NButton
           v-if="input.message"
           quaternary
           size="small"
-          class="ml-2"
+          class="rounded-8"
           @click="handleClear"
         >
           <template #icon>
@@ -127,11 +137,18 @@ const handShortcut = (e: KeyboardEvent) => {
           清空
         </NButton>
       </div>
-      <NButton :disabled="sendable" strong circle type="primary" @click="handleSend">
+      <NButton
+        :disabled="sendable"
+        class="ui-btn-primary rounded-8px px-4!"
+        strong
+        type="primary"
+        @click="handleSend"
+      >
         <template #icon>
           <icon-material-symbols:stop-rounded v-if="isSending" />
           <icon-guidance:send v-else />
         </template>
+        {{ isSending ? '停止' : '发送' }}
       </NButton>
     </div>
   </div>

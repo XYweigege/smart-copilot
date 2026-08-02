@@ -68,16 +68,19 @@ const currentTitle = computed(() => {
   <div class="chat-container flex h-full relative">
     <!-- 历史记录侧边栏 -->
     <Transition name="slide">
-      <div 
+      <div
         v-if="chatStore.showHistorySidebar"
-        class="history-sidebar w-80 bg-white border-r border-gray-200 flex flex-col absolute left-0 top-0 h-full z-10 rounded-l-8px shadow-[1px_0_2px_rgba(15,23,42,0.05)]"
+        class="history-sidebar ui-card ui-surface w-80 flex flex-col absolute left-4 top-4 bottom-4 z-20 rounded-10px overflow-hidden"
       >
         <!-- 侧边栏头部 -->
-        <div class="p-4 border-b border-gray-200 flex items-center justify-between">
-          <h3 class="text-lg font-semibold text-gray-800">历史会话</h3>
+        <div class="px-4 py-3.5 border-b border-[var(--app-border)] flex items-center justify-between bg-[rgb(var(--primary-color)_/_0.04)]">
+          <div class="flex items-center gap-2">
+            <icon-material-symbols:history class="text-5 text-[rgb(var(--primary-color))]" />
+            <h3 class="text-base font-semibold text-gray-800 dark:text-gray-100">历史会话</h3>
+          </div>
           <button 
             @click="chatStore.toggleHistorySidebar()"
-            class="p-1 hover:bg-gray-100 rounded-md transition-colors"
+            class="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
           >
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -86,13 +89,12 @@ const currentTitle = computed(() => {
         </div>
         
         <!-- 会话列表 -->
-        <div class="flex-1 overflow-y-auto p-2">
+        <div class="flex-1 overflow-y-auto p-3 space-y-2">
           <!-- 空状态 -->
-          <div v-if="chatStore.conversationList.length === 0" class="text-center py-8 text-gray-400">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto mb-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-            </svg>
+          <div v-if="chatStore.conversationList.length === 0" class="text-center py-12 text-gray-400">
+            <icon-material-symbols:chat-bubble-outline class="h-12 w-12 mx-auto mb-3 opacity-40" />
             <p class="text-sm">暂无历史会话</p>
+            <p class="text-xs mt-1 text-gray-300">开始一段新对话吧</p>
           </div>
           
           <!-- 会话项列表 -->
@@ -100,15 +102,20 @@ const currentTitle = computed(() => {
             <div
               v-for="conv in chatStore.conversationList"
               :key="conv.conversationId"
-              class="group p-3 rounded-8px border border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer"
+              class="group p-3 rounded-8px border border-[var(--app-border)] hover:bg-[rgb(var(--primary-color)_/_0.04)] transition-colors duration-150 cursor-pointer relative overflow-hidden"
               :class="conv.conversationId === chatStore.conversationId ? 'conv-item--active' : ''"
               @click="handleSwitchConversation(conv.conversationId)"
             >
+              <!-- 选中态左侧色条 -->
+              <span
+                v-if="conv.conversationId === chatStore.conversationId"
+                class="absolute left-0 top-0 bottom-0 w-1 bg-[rgb(var(--primary-color))]"
+              />
               <!-- 标题与删除 -->
               <div class="flex items-center justify-between gap-2">
-                <span class="text-sm font-medium text-gray-800 truncate flex-1">{{ conv.title || '未命名会话' }}</span>
+                <span class="text-sm font-medium text-gray-800 truncate flex-1 pl-1">{{ conv.title || '未命名会话' }}</span>
                 <button
-                  class="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-50 rounded transition-opacity"
+                  class="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-50 rounded-lg transition-all"
                   @click.stop="handleDeleteConversation(conv.conversationId)"
                   title="删除会话"
                 >
@@ -119,9 +126,9 @@ const currentTitle = computed(() => {
               </div>
               
               <!-- 元信息 -->
-              <div class="flex items-center gap-2 mt-1">
+              <div class="flex items-center gap-2 mt-1.5 pl-1">
                 <span class="text-xs text-gray-400">{{ formatTime(conv.updatedAt) }}</span>
-                <span class="text-xs text-gray-400">·</span>
+                <span class="text-xs text-gray-300">·</span>
                 <span class="text-xs text-gray-400">{{ conv.messageCount }} 条消息</span>
               </div>
             </div>
@@ -129,12 +136,14 @@ const currentTitle = computed(() => {
         </div>
         
         <!-- 底部操作区 -->
-        <div class="p-4 border-t border-gray-200">
+        <div class="p-3 border-t border-[var(--app-border)]">
           <button
             @click="handleNewConversation"
-            class="w-full px-4 py-2 text-white rounded-lg transition-colors duration-200 text-sm font-medium"
-            style="background-color: #2563eb"
+            class="ui-btn-primary w-full px-4 py-2 text-white rounded-8px text-sm font-medium flex items-center justify-center gap-2"
           >
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
             新建会话
           </button>
         </div>
@@ -142,34 +151,31 @@ const currentTitle = computed(() => {
     </Transition>
     
     <!-- 主聊天区域 -->
-    <div class="flex-1 flex flex-col gap-4 transition-all duration-300" :class="{ 'ml-80': chatStore.showHistorySidebar }">
+    <div class="flex-1 flex flex-col gap-4 transition-all duration-300 min-w-0" :class="{ 'ml-88': chatStore.showHistorySidebar }">
       <!-- 顶部按钮栏 -->
-      <div class="flex justify-between items-center mb-2">
+      <div class="ui-card flex justify-between items-center px-4 py-2.5 sticky top-0 z-10">
         <!-- 历史记录按钮 -->
         <button
           @click="chatStore.toggleHistorySidebar()"
-          class="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors duration-200 text-sm font-medium"
+          class="flex items-center gap-2 px-3 py-1.5 text-gray-600 bg-[rgb(var(--primary-color)_/_0.05)] hover:bg-[rgb(var(--primary-color)_/_0.1)] rounded-6px transition-colors duration-150 text-sm font-medium"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
+          <icon-material-symbols:history class="h-4 w-4" />
           历史记录
         </button>
 
         <!-- 当前会话标题 -->
-        <div class="flex items-center gap-2 text-gray-600 min-w-0 flex-1 justify-center px-4">
-          <icon-material-symbols:chat-bubble-outline class="text-4 flex-shrink-0" />
-          <span class="text-4 font-medium truncate">{{ currentTitle }}</span>
+        <div class="flex items-center gap-2 text-gray-600 dark:text-gray-300 min-w-0 flex-1 justify-center px-4">
+          <icon-material-symbols:chat-bubble-outline class="text-5 flex-shrink-0 text-[rgb(var(--primary-color))]" />
+          <span class="text-base font-semibold truncate">{{ currentTitle }}</span>
         </div>
 
         <!-- 新会话按钮 -->
         <button
           @click="handleNewConversation"
-          class="flex items-center gap-2 px-4 py-2 text-white rounded-lg transition-colors duration-200 text-sm font-medium shadow-sm hover:shadow-md"
-          style="background-color: #2563eb"
+          class="ui-btn-primary flex items-center gap-2 px-3.5 py-1.5 text-white rounded-6px text-sm font-medium"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
           </svg>
           新会话
         </button>
@@ -185,12 +191,13 @@ const currentTitle = computed(() => {
 /* 侧边栏滑入动画 */
 .slide-enter-active,
 .slide-leave-active {
-  transition: transform 0.3s ease;
+  transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.32s ease;
 }
 
 .slide-enter-from,
 .slide-leave-to {
-  transform: translateX(-100%);
+  transform: translateX(-12px);
+  opacity: 0;
 }
 
 /* 文本截断3行 */
@@ -201,9 +208,9 @@ const currentTitle = computed(() => {
   overflow: hidden;
 }
 
-/* 当前会话选中态：主色浅底，弱化写死蓝的炫光感 */
+/* 当前会话选中态：主色浅底 + 左侧高亮，弱化写死蓝的炫光感 */
 .conv-item--active {
-  background-color: #eff6ff;
-  border-color: #bfdbfe;
+  background-color: rgb(var(--primary-color) / 0.08);
+  border-color: rgb(var(--primary-color) / 0.3);
 }
 </style>

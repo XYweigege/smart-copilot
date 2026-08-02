@@ -215,57 +215,75 @@ async function handleSourceFileClick(fileInfo: { fileName: string, referenceNumb
 </script>
 
 <template>
-  <div class="mb-8 flex-col gap-2">
-    <div v-if="msg.role === 'user'" class="flex items-center gap-4">
-      <NAvatar class="bg-#e5e7eb">
-        <SvgIcon icon="ph:user-circle" class="text-icon-large color-#475569" />
-      </NAvatar>
-      <div class="flex-col gap-1">
-        <NText class="text-4 font-bold">{{ authStore.userInfo.username }}</NText>
-        <NText class="text-3 color-gray-500">{{ formatDate(msg.timestamp) }}</NText>
+  <div class="ui-fade-up mb-5 flex-col gap-2">
+    <!-- 助手消息：左对齐 -->
+    <template v-if="msg.role === 'assistant'">
+      <div class="flex items-center gap-3">
+        <NAvatar round size="medium" class="bg-[rgb(var(--primary-color)_/_0.1)] text-[rgb(var(--primary-color))] shrink-0">
+          <SvgIcon icon="material-symbols:smart-toy-outline" class="text-6" />
+        </NAvatar>
+        <div class="flex-col gap-0.5">
+          <NText class="text-4 font-semibold text-gray-700 dark:text-gray-200">派聪明</NText>
+          <NText class="text-3 color-gray-400">{{ formatDate(msg.timestamp) }}</NText>
+        </div>
       </div>
-    </div>
-    <div v-else class="flex items-center gap-4">
-      <NAvatar class="bg-#2563eb">
-        <SvgIcon icon="material-symbols:smart-toy-outline" class="text-6 text-white" />
-      </NAvatar>
-      <div class="flex-col gap-1">
-        <NText class="text-4 font-bold">派聪明</NText>
-        <NText class="text-3 color-gray-500">{{ formatDate(msg.timestamp) }}</NText>
-      </div>
-    </div>
 
-    <NText v-if="msg.status === 'pending'">
-      <icon-eos-icons:three-dots-loading class="ml-12 mt-2 text-8" />
-    </NText>
-    <NText v-else-if="msg.status === 'error'" class="ml-12 mt-2 italic">服务器繁忙，请稍后再试</NText>
+      <NText v-if="msg.status === 'pending'" class="ml-12 mt-2">
+        <icon-eos-icons:three-dots-loading class="text-8 text-[rgb(var(--primary-color))]" />
+      </NText>
+      <NText v-else-if="msg.status === 'error'" class="ml-12 mt-2 text-4 color-red-500">
+        服务器繁忙，请稍后再试
+      </NText>
+      <div
+        v-else
+        class="mt-2 ml-12 max-w-[calc(100%-3.5rem)] ui-card bg-[rgb(var(--primary-color)_/_0.03)] p-4"
+        @click="handleContentClick"
+      >
+        <VueMarkdownIt :content="content" />
+      </div>
+    </template>
+
+    <!-- 用户消息：右对齐 -->
+    <template v-else>
+      <div class="flex flex-row-reverse items-center gap-3">
+        <NAvatar round size="medium" class="bg-gray-200 text-gray-600 dark:bg-gray-600 dark:text-gray-100 shrink-0">
+          <SvgIcon icon="ph:user-circle" class="text-icon-large" />
+        </NAvatar>
+        <div class="flex flex-col items-end gap-0.5">
+          <NText class="text-4 font-semibold text-gray-700 dark:text-gray-200">{{ authStore.userInfo.username }}</NText>
+          <NText class="text-3 color-gray-400">{{ formatDate(msg.timestamp) }}</NText>
+        </div>
+      </div>
+
+      <div
+        class="mt-2 mr-12 ml-auto max-w-[calc(100%-3.5rem)] rounded-10px border border-[var(--app-border)] bg-[rgb(var(--primary-color)_/_0.06)] p-4 text-4 text-gray-800 dark:text-gray-100"
+      >{{ content }}</div>
+    </template>
+
+    <!-- 操作栏 -->
     <div
-      v-else-if="msg.role === 'assistant'"
-      class="mt-2 ml-12 max-w-[calc(100%-3rem)] rounded-8 bg-#f8fafc b-1 b-#e5e7eb p-4 dark:bg-#1f2937 dark:b-#374151"
-      @click="handleContentClick"
+      class="ml-12 flex gap-1"
+      :class="msg.role === 'user' ? 'mr-12 justify-end' : ''"
     >
-      <VueMarkdownIt :content="content" />
-    </div>
-    <NText
-      v-else-if="msg.role === 'user'"
-      class="ml-12 mt-2 max-w-[calc(100%-3rem)] rounded-8 bg-#eff6ff b-1 b-#dbeafe p-4 text-4 dark:bg-#1e293b dark:b-#334155"
-    >{{ content }}</NText>
-
-    <NDivider class="ml-12 w-[calc(100%-3rem)] mb-0! mt-2!" />
-    <div class="ml-12 flex gap-4">
-      <NButton quaternary size="small" @click="handleCopy(msg.content)">
+      <NButton quaternary size="small" class="rounded-8" @click="handleCopy(msg.content)">
         <template #icon>
           <icon-mynaui:copy />
         </template>
         复制
       </NButton>
-      <NButton quaternary size="small" @click="emit('delete', props.index)">
+      <NButton quaternary size="small" class="rounded-8" @click="emit('delete', props.index)">
         <template #icon>
           <icon-material-symbols:delete-outline />
         </template>
         删除
       </NButton>
-      <NButton v-if="msg.role === 'assistant' && msg.status === 'finished'" quaternary size="small" @click="emit('regenerate')">
+      <NButton
+        v-if="msg.role === 'assistant' && msg.status === 'finished'"
+        quaternary
+        size="small"
+        class="rounded-8"
+        @click="emit('regenerate')"
+      >
         <template #icon>
           <icon-material-symbols:refresh />
         </template>
@@ -277,18 +295,22 @@ async function handleSourceFileClick(fileInfo: { fileName: string, referenceNumb
 
 <style scoped lang="scss">
 :deep(.source-file-link) {
-  color: #2563eb;
+  color: rgb(var(--primary-color));
   cursor: pointer;
   text-decoration: underline;
-  transition: color 0.2s;
+  text-underline-offset: 2px;
+  transition: color 0.2s, opacity 0.2s;
 
   &:hover {
-    color: #1d4ed8;
+    opacity: 0.75;
     text-decoration: none;
   }
+}
 
-  &:active {
-    color: #1e40af;
-  }
+// 助手消息内 markdown 容器细节
+:deep(.markdown-body) {
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--text-color, inherit);
 }
 </style>

@@ -1,0 +1,129 @@
+// =============================================================
+//  PaiSmart UI 令牌 —— 清爽后台管理风
+//  特点：浅灰分层背景、克制细边框、低饱和、弱阴影。
+//  颜色统一引用 Soybean 注入的 CSS 变量，深浅色自适应。
+// =============================================================
+
+// ---------- 圆角（偏小，体现后台严谨感） ----------
+$radius-sm: 6px;
+$radius-md: 8px;
+$radius-lg: 10px;
+$radius-xl: 12px;
+
+// ---------- 阴影（极轻，仅用于层级区分） ----------
+$shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+$shadow-md: 0 2px 8px rgba(15, 23, 42, 0.06);
+$shadow-lg: 0 6px 20px rgba(15, 23, 42, 0.08);
+
+// ---------- 过渡 ----------
+$ease: cubic-bezier(0.4, 0, 0.2, 1);
+
+@mixin ui-rounded($r: $radius-md) {
+  border-radius: $r;
+}
+
+// 后台标准卡片：白底、1px 细边框、极轻阴影
+@mixin ui-card {
+  @include ui-rounded($radius-lg);
+  background: var(--card-color, #fff);
+  border: 1px solid var(--border-color, rgba(15, 23, 42, 0.08));
+  box-shadow: $shadow-sm;
+}
+
+// 区域底色（后台常见的浅灰内容区）
+@mixin ui-surface {
+  background: var(--body-color, rgba(15, 23, 42, 0.02));
+}
+
+// ---------- 全局基础观感 ----------
+:root {
+  --app-radius-sm: #{$radius-sm};
+  --app-radius-md: #{$radius-md};
+  --app-radius-lg: #{$radius-lg};
+  --app-radius-xl: #{$radius-xl};
+  --app-shadow-sm: #{$shadow-sm};
+  --app-shadow-md: #{$shadow-md};
+  --app-shadow-lg: #{$shadow-lg};
+  --app-border: var(--border-color, rgba(15, 23, 42, 0.08));
+}
+
+html.dark {
+  --app-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --app-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --app-shadow-lg: 0 6px 20px rgba(0, 0, 0, 0.5);
+  --app-border: var(--border-color, rgba(255, 255, 255, 0.1));
+}
+
+// 全局滚动条美化（细、低存在感）
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(15, 23, 42, 0.16) transparent;
+
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background-color: rgba(15, 23, 42, 0.16);
+    border-radius: 6px;
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(15, 23, 42, 0.28);
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+html.dark * {
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+
+  &::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.16);
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.28);
+  }
+}
+
+// ---------- 复用工具类 ----------
+// 标准卡片
+.ui-card {
+  @include ui-card;
+}
+
+// 浅灰内容区（侧边栏/输入区底色）
+.ui-surface {
+  @include ui-surface;
+}
+
+// 主按钮：纯主色填充，无渐变、无大阴影，克制
+.ui-btn-primary {
+  background-color: rgb(var(--primary-color));
+  border-color: rgb(var(--primary-color));
+  transition: filter 0.15s $ease, background-color 0.15s $ease;
+
+  &:hover {
+    filter: brightness(0.94);
+  }
+}
+
+// 平滑进入动画（保留，但幅度更小）
+@keyframes ui-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ui-fade-up {
+  animation: ui-fade-up 0.25s $ease both;
+}

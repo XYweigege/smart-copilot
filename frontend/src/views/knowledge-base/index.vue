@@ -260,8 +260,10 @@ function handleSearch() {
 
 // 渲染上传状态
 function renderStatus(status: UploadStatus, percentage: number) {
-  if (status === UploadStatus.Completed) return <NTag type="success">已完成</NTag>;
-  else if (status === UploadStatus.Break) return <NTag type="error">上传中断</NTag>;
+  if (status === UploadStatus.Completed)
+    return <NTag type="success" round bordered={false}>已完成</NTag>;
+  else if (status === UploadStatus.Break)
+    return <NTag type="error" round bordered={false}>上传中断</NTag>;
   return <NProgress percentage={percentage} processing />;
 }
 
@@ -327,11 +329,22 @@ async function onBeforeUpload(
 
 <template>
   <div class="min-h-500px flex-col-stretch gap-16px overflow-hidden lt-sm:overflow-auto">
-    <NCard title="文件列表" :bordered="false" size="small" class="sm:flex-1-hidden card-wrapper">
+    <NCard
+      title="文件列表"
+      :bordered="false"
+      size="small"
+      class="sm:flex-1-hidden card-wrapper ui-card"
+    >
+      <template #header>
+        <div class="flex items-center gap-2">
+          <icon-material-symbols:folder-open-rounded class="text-5 text-[rgb(var(--primary-color))]" />
+          <span class="text-base font-semibold text-gray-800 dark:text-gray-100">文件列表</span>
+        </div>
+      </template>
       <template #header-extra>
         <TableHeaderOperation v-model:columns="columnChecks" :loading="loading" @add="handleUpload" @refresh="getList">
           <template #prefix>
-            <NButton size="small" ghost type="primary" @click="handleSearch">
+            <NButton size="small" ghost type="primary" class="rounded-8" @click="handleSearch">
               <template #icon>
                 <icon-ic-round-search class="text-icon" />
               </template>
