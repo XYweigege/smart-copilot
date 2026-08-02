@@ -1,8 +1,11 @@
 package com.yizhaoqi.smartpai.controller;
 
 import com.yizhaoqi.smartpai.handler.ChatWebSocketHandler;
+import com.yizhaoqi.smartpai.config.SensitiveWordConfig;
+import com.yizhaoqi.smartpai.config.SensitiveWordFilter;
 import com.yizhaoqi.smartpai.service.ChatHandler;
 import com.yizhaoqi.smartpai.utils.LogUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -17,6 +20,7 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Component
 @RestController
@@ -24,6 +28,12 @@ import java.util.Map;
 public class ChatController extends TextWebSocketHandler {
 
     private final ChatHandler chatHandler;
+
+    @Autowired
+    private SensitiveWordFilter sensitiveWordFilter;
+
+    @Autowired
+    private SensitiveWordConfig sensitiveWordConfig;
 
     public ChatController(ChatHandler chatHandler) {
         this.chatHandler = chatHandler;
@@ -33,14 +43,32 @@ public class ChatController extends TextWebSocketHandler {
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         String userMessage = message.getPayload();
         String userId = session.getId(); // Use session ID as userId for simplicity
-        
+
         LogUtils.PerformanceMonitor monitor = LogUtils.startPerformanceMonitor("WEBSOCKET_CHAT");
         try {
             LogUtils.logChat(userId, session.getId(), "USER_MESSAGE", userMessage.length());
             LogUtils.logBusiness("WEBSOCKET_CHAT", userId, "处理WebSocket聊天消息: messageLength=%d", userMessage.length());
-            
-        chatHandler.processMessage(userId, userMessage, session);
-            
+
+            // 敏感词拦截：命中则记录审计并拒绝，不转发给大模型
+            if (sensitiveWordFilter != null && sensitiveWordFilter.contains(userMessage)) {
+                Set<String> hits = sensitiveWordFilter.findAll(userMessage);
+                String audit = String.format(
+                        "敏感词拦截(WebSocket): 用户=%s 命中词=%s IP=%s",
+                        userId, hits, session.getRemoteAddress());
+                if (sensitiveWordConfig.isAuditLog()) {
+                    LogUtils.logAudit("SENSITIVE_WORD_BLOCKED", audit);
+                } else {
+                    LogUtils.logBusiness("SENSITIVE_WORD_BLOCKED", userId, audit);
+                }
+                chatHandler.sendRefuseMessage(session,
+                        sensitiveWordConfig.getRejectMessage() + "（命中敏感词：" + String.join("、", hits) + "）");
+                LogUtils.logUserOperation(userId, "WEBSOCKET_CHAT", "sensitive_blocked", "BLOCKED");
+                monitor.end("WebSocket消息被敏感词拦截");
+                return;
+            }
+
+            chatHandler.processMessage(userId, userMessage, session);
+
             LogUtils.logUserOperation(userId, "WEBSOCKET_CHAT", "message_processing", "SUCCESS");
             monitor.end("WebSocket消息处理成功");
         } catch (Exception e) {

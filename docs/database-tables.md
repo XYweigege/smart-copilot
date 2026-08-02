@@ -68,8 +68,8 @@ VALUES ('company',   '全公司',   '根组织',        NULL,    1),
 | `file_md5` | 文件指纹，同一文件不重复存 |
 | `file_name` | 原始文件名 |
 | `total_size` | 字节数 |
-| `status` | 0=上传中 / 1=已合并待解析 / 2=已解析完成 等 |
-| `user_id` | 上传者 |
+| `status` | 0=上传中 / 1=已合并完成（合并后即可进入解析与向量化流程）；注意：本表只有这两个状态，没有"已解析完成"等其它值 |
+| `user_id` | 上传者；**注意存的是 `username` 字符串（如 `zhangsan`），并非 `users.id`**，且本表未建外键约束 |
 | `org_tag` | 归属组织（决定谁能检索这份文档） |
 | `is_public` | 是否公开（公开则所有人可检索） |
 | `merged_at` | 分片合并完成时间 |
@@ -79,7 +79,8 @@ VALUES ('company',   '全公司',   '根组织',        NULL,    1),
 INSERT INTO file_upload (file_md5, file_name, total_size, status, user_id, org_tag, is_public)
 VALUES ('3e25960a79dbc69b674cd4ec67a72c62', '公司制度手册.pdf', 2048000, 1, 'zhangsan', 'hr', 0);
 ```
-> 含义：zhangsan 上传了《公司制度手册.pdf》，MD5 为 3e25…，归属 hr 组织、不公开，状态=已合并待解析。
+> 含义：zhangsan 上传了《公司制度手册.pdf》，MD5 为 3e25…，归属 hr 组织、不公开，状态=1（已合并完成）。
+> 注意：`user_id` 这里存的是用户名字符串 `zhangsan`，不是用户主键 `id`（见第 7 节关系说明）。
 
 **在系统里怎么用**：`UploadController` 合并分片后写此表并发送 Kafka 消息；`DocumentController` 删除文档时据此清理 ES/MinIO。唯一键 `(file_md5, user_id)` 防重复。
 
@@ -114,27 +115,32 @@ INSERT INTO chunk_info (file_md5, chunk_index, chunk_md5, storage_path) VALUES
 
 **用途**：这是**检索时的原文存根表**。文档解析后按语义切块（默认 512 字符/块），每块的**原文文本 + 权限/溯源元数据**存在这里；真正的向量存在 **Elasticsearch** 的 `dense_vector` 字段（本表不存向量）。ES 负责"检索定位"，本表负责"检索后取回原文、扩展上下文、抽图谱"。
 
-**关键字段**
+**关键字段**（以 `docs/databases/ddl.sql` 为准）
 | 字段 | 说明 |
 |------|------|
-| `file_md5` | 来源文件 |
-| `chunk_id` | 第几个语义块 |
-| `text_content` | 该块纯文本（会被 ES 索引、也会被拼进 Prompt） |
-| `model_version` | 向量模型版本（如 `text-embedding-v4`） |
-| `user_id` | 上传者 |
+| `id` | 主键 |
+| `file_md5` | 来源文件（关联 file_upload.file_md5） |
+| `chunk_index` | 第几个语义块（从 0 开始） |
+| `content` | 该块纯文本（会被 ES 索引、也会被拼进 Prompt） |
+| `parent_chunk_id` | 父块ID；用于 "Parent Chunk" 上下文扩展——检索命中子块时，可带上父块的更大上下文一起返回，提升回答质量 |
+| `user_id` | 上传者（存的是 `username` 字符串，非 `users.id`，用于按组织/用户隔离） |
 | `org_tag` | 归属组织（检索权限过滤用） |
-| `is_public` | 是否公开 |
+| `retrieval_count` | 命中次数（日志/统计） |
+| `model_version` | 向量模型版本（如 `text-embedding-v4`） |
+| `created_at` | 创建时间 |
+
+> 注意：本表**没有** `is_public` 列，公开性完全由 `org_tag` 决定；也没有 `chunk_id`，序号字段是 `chunk_index`。
 
 **示例**
 ```sql
-INSERT INTO document_chunks (file_md5, chunk_id, text_content, model_version, user_id, org_tag, is_public)
+INSERT INTO document_chunks (file_md5, chunk_index, content, parent_chunk_id, user_id, org_tag, model_version)
 VALUES ('3e25960a79dbc69b674cd4ec67a72c62', 0,
         '年假申请需在钉钉提交，提前 3 个工作日审批。',
-        'text-embedding-v4', 'zhangsan', 'hr', 0);
+        NULL, 'zhangsan', 'hr', 'text-embedding-v4');
 ```
 > 含义：手册第 0 块内容是"年假申请规则"。它的向量（2048 维）存在 ES 的 `dense_vector` 字段；`org_tag=hr` 保证只有 HR 组织用户能搜到。本表只存原文与元数据，不存向量。
 
-**在系统里怎么用**：`ParseService` 调 `VectorizationService` 向量化后写入；`HybridSearchService` 召回时，用 `org_tag`/`is_public` 过滤，再把 `text_content` 作为上下文喂给 LLM（见后端文档 §2、§5）。
+**在系统里怎么用**：`ParseService` 解析切块后，把原文与元数据写入本表，同时由 `VectorizationService` 把向量写入 Elasticsearch（**注意：向量不在此表，只存原文与元数据**）；`HybridSearchService` 召回时，用 `org_tag`/`is_public` 过滤，再把 `text_content` 作为上下文喂给 LLM（见后端文档 §2、§5）。
 
 ---
 
@@ -182,9 +188,14 @@ users.org_tags  ── 引用 ──> organization_tags.tag_id   （逗号分隔
 file_upload.org_tag / document_chunks.org_tag ── 引用 ──> organization_tags.tag_id
 ```
 
+> ⚠️ **关于 `user_id` 的两种语义（易混点）**
+> - `conversations.user_id` 是 **BIGINT 外键**，引用 `users.id`（如示例中的 `12`），是真正的用户主键关联。
+> - `file_upload.user_id` / `document_chunks.user_id` 是 **VARCHAR(64)**，**存的是 `username` 字符串**（如示例中的 `'zhangsan'`），本表**没有**建外键约束，仅作为逻辑归属标记。
+> - 因此上面 `users (1) ──< file_upload (n)` 表达的是"一个用户上传多个文件"的业务关系，并非数据库外键约束。
+
 **贯穿全局的线索是 `file_md5`**：
 `file_upload` → `chunk_info` → `document_chunks` 三张表都用它串联同一份文档；而 `org_tag` 是贯穿 `users` / `file_upload` / `document_chunks` 的**权限隔离键**。
 
 ---
 
-> 文档版本：v1.0（数据库表说明） · 最后更新：2026-08-01
+> 文档版本：v1.0（数据库表说明） · 最后更新：2026-08-02

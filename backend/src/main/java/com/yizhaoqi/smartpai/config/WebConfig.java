@@ -1,9 +1,12 @@
 package com.yizhaoqi.smartpai.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.DispatcherType;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.Ordered;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
@@ -23,6 +26,12 @@ public class WebConfig implements WebMvcConfigurer {
 
     @Autowired
     private LoggingInterceptor loggingInterceptor;
+
+    @Autowired
+    private SensitiveWordFilter sensitiveWordFilter;
+
+    @Autowired
+    private SensitiveWordConfig sensitiveWordConfig;
 
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
@@ -64,5 +73,20 @@ public class WebConfig implements WebMvcConfigurer {
         
         jsonConverter.setObjectMapper(objectMapper);
         converters.add(jsonConverter);
+    }
+
+    /**
+     * 注册敏感词 HTTP 过滤器。
+     * order 设为较高优先级之后，确保在认证过滤器处理完、能拿到当前用户后再做扫描。
+     */
+    @Bean
+    public FilterRegistrationBean<SensitiveWordFilterOnce> sensitiveWordFilterRegistration() {
+        FilterRegistrationBean<SensitiveWordFilterOnce> registration = new FilterRegistrationBean<>();
+        registration.setFilter(new SensitiveWordFilterOnce(sensitiveWordFilter, sensitiveWordConfig));
+        registration.addUrlPatterns("/api/v1/*");
+        registration.setName("sensitiveWordFilter");
+        registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 10);
+        registration.setDispatcherTypes(DispatcherType.REQUEST);
+        return registration;
     }
 } 

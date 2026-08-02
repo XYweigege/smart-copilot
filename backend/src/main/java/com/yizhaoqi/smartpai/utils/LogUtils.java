@@ -36,6 +36,18 @@ public class LogUtils {
     }
     
     /**
+     * 记录审计日志（用于安全/合规类事件，如敏感词拦截、越权尝试等）
+     */
+    public static void logAudit(String operation, String message) {
+        try {
+            MDC.put(OPERATION, operation);
+            BUSINESS_LOGGER.warn("[审计] [{}] {}", operation, message);
+        } finally {
+            MDC.clear();
+        }
+    }
+
+    /**
      * 记录业务错误日志
      */
     public static void logBusinessError(String operation, String userId, String message, Throwable throwable, Object... args) {

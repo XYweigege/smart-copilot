@@ -4,10 +4,13 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yizhaoqi.smartpai.client.DeepSeekClient;
+import com.yizhaoqi.smartpai.config.SensitiveWordConfig;
+import com.yizhaoqi.smartpai.config.SensitiveWordFilter;
 import com.yizhaoqi.smartpai.entity.SearchResult;
 import com.yizhaoqi.smartpai.model.DocumentChunk;
 import com.yizhaoqi.smartpai.repository.DocumentChunkRepository;
 import com.yizhaoqi.smartpai.service.ConversationService;
+import com.yizhaoqi.smartpai.utils.LogUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -44,14 +47,18 @@ public class ChatHandler {
     private final DocumentChunkRepository documentChunkRepository;
     private final ConversationSummaryService conversationSummaryService;
     private final ConversationService conversationService;
+    private final SensitiveWordConfig sensitiveWordConfig;
+    private final SensitiveWordFilter sensitiveWordFilter;
     private final ObjectMapper objectMapper;
-    
+
     // 用于存储每个会话的完整响应
     private final Map<String, StringBuilder> responseBuilders = new ConcurrentHashMap<>();
     // 用于跟踪每个会话的响应完成状态
     private final Map<String, CompletableFuture<String>> responseFutures = new ConcurrentHashMap<>();
     // 停止标志 - 简单方案
     private final Map<String, Boolean> stopFlags = new ConcurrentHashMap<>();
+    // 输出侧敏感词拦截标志：命中后本会话的回复将被拦截、不落库
+    private final Map<String, Boolean> blockedFlags = new ConcurrentHashMap<>();
     // 用于存储每个会话的引用映射：sessionId -> {referenceNumber -> fileMd5}
     private final Map<String, Map<Integer, String>> sessionReferenceMappings = new ConcurrentHashMap<>();
     // 用于存储每个会话的用户ID：sessionId -> userId
@@ -62,13 +69,17 @@ public class ChatHandler {
                       DeepSeekClient deepSeekClient,
                       DocumentChunkRepository documentChunkRepository,
                       ConversationSummaryService conversationSummaryService,
-                      ConversationService conversationService) {
+                      ConversationService conversationService,
+                      SensitiveWordConfig sensitiveWordConfig,
+                      SensitiveWordFilter sensitiveWordFilter) {
         this.redisTemplate = redisTemplate;
         this.searchService = searchService;
         this.deepSeekClient = deepSeekClient;
         this.documentChunkRepository = documentChunkRepository;
         this.conversationSummaryService = conversationSummaryService;
         this.conversationService = conversationService;
+        this.sensitiveWordConfig = sensitiveWordConfig;
+        this.sensitiveWordFilter = sensitiveWordFilter;
         this.objectMapper = new ObjectMapper();
     }
 
@@ -87,6 +98,8 @@ public class ChatHandler {
 
             // 为当前会话创建响应构建器
             responseBuilders.put(session.getId(), new StringBuilder());
+            // 重置输出侧敏感词拦截标志
+            blockedFlags.remove(session.getId());
             // 创建一个CompletableFuture来跟踪响应完成状态
             CompletableFuture<String> responseFuture = new CompletableFuture<>();
             responseFutures.put(session.getId(), responseFuture);
@@ -115,6 +128,16 @@ public class ChatHandler {
                     StringBuilder responseBuilder = responseBuilders.get(session.getId());
                     if (responseBuilder != null) {
                         responseBuilder.append(chunk);
+                    }
+                    // 输出侧敏感词拦截：一旦累积内容命中敏感词，立即标记并停止推送
+                    if (Boolean.FALSE.equals(blockedFlags.get(session.getId()))) {
+                        // 已经判定拦截，直接丢弃后续 chunk
+                        return;
+                    }
+                    if (sensitiveWordFilter != null && sensitiveWordFilter.contains(responseBuilder == null ? "" : responseBuilder.toString())) {
+                        blockedFlags.put(session.getId(), true);
+                        logger.warn("AI 输出命中敏感词，会话 {} 将被拦截，不向前端推送完整内容", session.getId());
+                        return;
                     }
                     sendResponseChunk(session, chunk);
                 },
@@ -684,6 +707,38 @@ public class ChatHandler {
         responseFuture.complete(completeResponse);
         logger.info("DeepSeek响应已完成，长度: {}", completeResponse.length());
 
+        // 输出侧敏感词拦截：命中则不保存对话、不落库，并向前端发送拦截提示
+        if (Boolean.TRUE.equals(blockedFlags.get(session.getId()))) {
+            Set<String> hits = sensitiveWordFilter != null ? sensitiveWordFilter.findAll(completeResponse) : Set.of();
+            String audit = String.format(
+                    "AI输出敏感词拦截: 用户=%s 会话=%s 命中词=%s IP=%s 回复长度=%d（未落库）",
+                    userId, session.getId(), hits, session.getRemoteAddress(), completeResponse.length());
+            if (sensitiveWordConfig.isAuditLog()) {
+                LogUtils.logAudit("AI_OUTPUT_SENSITIVE_BLOCKED", audit);
+            } else {
+                logger.warn(audit);
+            }
+            // 不调用 onConversationComplete（避免违规内容入库/入历史），改发拦截提示
+            try {
+                sendRefuseMessage(session,
+                        sensitiveWordConfig.getRejectMessage()
+                                + "（AI 回复命中敏感词：" + String.join("、", hits) + "，已拦截未保存）");
+            } catch (Exception e) {
+                logger.error("发送 AI 输出拦截提示失败: {}", e.getMessage(), e);
+            }
+            // 发送完成通知，让前端正常结束流式状态
+            try {
+                sendCompletionNotification(session);
+            } catch (Exception ignored) {
+            }
+            // 清理
+            blockedFlags.remove(session.getId());
+            responseBuilders.remove(session.getId());
+            responseFutures.remove(session.getId());
+            logger.info("AI 输出因敏感词被拦截，已终止，用户ID: {}", userId);
+            return;
+        }
+
         // 发送响应完成通知
         sendCompletionNotification(session);
 
@@ -740,6 +795,10 @@ public class ChatHandler {
                 logger.debug("检测到停止标志，跳过发送响应块");
                 return;
             }
+            // 输出侧敏感词拦截：已判定拦截则不再推送任何内容
+            if (Boolean.TRUE.equals(blockedFlags.get(session.getId()))) {
+                return;
+            }
             
             // 将chunk包装成JSON格式，匹配前端期望的数据结构
             Map<String, String> chunkResponse = Map.of("chunk", chunk);
@@ -780,6 +839,26 @@ public class ChatHandler {
             session.sendMessage(new TextMessage(json));
         } catch (Exception e) {
             logger.error("发送会话ID失败: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 向客户端发送敏感词拦截拒绝消息（命中敏感词时调用，不触发大模型）
+     */
+    public void sendRefuseMessage(WebSocketSession session, String reason) {
+        try {
+            long currentTime = System.currentTimeMillis();
+            Map<String, Object> response = Map.of(
+                    "type", "sensitive_blocked",
+                    "error", reason,
+                    "timestamp", currentTime,
+                    "date", java.time.Instant.ofEpochMilli(currentTime).toString()
+            );
+            String refuseJson = objectMapper.writeValueAsString(response);
+            logger.warn("向会话 {} 发送敏感词拦截消息: {}", session.getId(), refuseJson);
+            session.sendMessage(new TextMessage(refuseJson));
+        } catch (Exception e) {
+            logger.error("发送敏感词拦截消息失败: {}", e.getMessage(), e);
         }
     }
 
