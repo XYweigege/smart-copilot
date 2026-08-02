@@ -10,7 +10,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class ConversationService {
@@ -59,6 +62,36 @@ public class ConversationService {
         conversation.setAnswer(answer);
 
         conversationRepository.save(conversation);
+    }
+
+    /**
+     * 从 MySQL 按会话 ID 聚合出完整的消息列表，作为 Redis 过期后的兜底数据源。
+     *
+     * MySQL 中每条记录是一问一答（question/answer 各一行语义为同一轮），
+     * 这里将其还原成与 Redis 中 {@code conversation:{id}} 一致的扁平消息流：
+     * 每一轮拆成 user 消息 + assistant 消息，并按时间戳升序排列。
+     *
+     * @param conversationId 会话 ID
+     * @return 扁平化消息列表，元素格式为 {role, content, timestamp}
+     */
+    public List<Map<String, String>> getHistoryFromMysql(String conversationId) {
+        List<Conversation> rows = conversationRepository.findByConversationIdOrderByTimestampAsc(conversationId);
+        List<Map<String, String>> messages = new ArrayList<>();
+        for (Conversation row : rows) {
+            String ts = row.getTimestamp() != null ? row.getTimestamp().toString() : "";
+            Map<String, String> userMsg = new LinkedHashMap<>();
+            userMsg.put("role", "user");
+            userMsg.put("content", row.getQuestion() != null ? row.getQuestion() : "");
+            userMsg.put("timestamp", ts);
+            messages.add(userMsg);
+
+            Map<String, String> assistantMsg = new LinkedHashMap<>();
+            assistantMsg.put("role", "assistant");
+            assistantMsg.put("content", row.getAnswer() != null ? row.getAnswer() : "");
+            assistantMsg.put("timestamp", ts);
+            messages.add(assistantMsg);
+        }
+        return messages;
     }
 
     /**

@@ -36,4 +36,13 @@ public interface ConversationRepository extends JpaRepository<Conversation, Long
      * @return 符合条件的对话记录列表
      */
     List<Conversation> findByTimestampBetween(LocalDateTime startDate, LocalDateTime endDate);
+
+    /**
+     * 根据会话 ID 查询该会话下的所有对话记录（按时间升序）。
+     * 用于 Redis 过期后从 MySQL 兜底还原某个历史会话的完整消息。
+     *
+     * @param conversationId 会话 ID
+     * @return 该会话的所有对话记录（升序）
+     */
+    List<Conversation> findByConversationIdOrderByTimestampAsc(String conversationId);
 }

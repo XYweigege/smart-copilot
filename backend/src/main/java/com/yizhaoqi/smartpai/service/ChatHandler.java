@@ -287,12 +287,24 @@ public class ChatHandler {
             String historyKey = "conversation:" + conversationId;
             String historyJson = redisTemplate.opsForValue().get(historyKey);
 
-            // 清理历史记录缺失的脏数据会话（历史会话无消息内容，予以过滤并从列表移除）
+            // Redis 历史缺失（可能因 7 天过期）：尝试从 MySQL 兜底还原，而不是直接丢弃会话。
+            // MySQL 中保留完整对话明细，过期会话仍可恢复并展示在侧边栏。
             if (historyJson == null || historyJson.isEmpty()) {
-                redisTemplate.opsForZSet().remove(listKey, conversationId);
-                redisTemplate.delete(metaKey);
-                logger.info("清理无历史记录的脏数据会话: {}", conversationId);
-                continue;
+                List<Map<String, String>> mysqlHistory = conversationService.getHistoryFromMysql(conversationId);
+                if (mysqlHistory.isEmpty()) {
+                    // MySQL 也无记录，确属脏数据，清理之
+                    redisTemplate.opsForZSet().remove(listKey, conversationId);
+                    redisTemplate.delete(metaKey);
+                    logger.info("清理无历史记录的脏数据会话: {}", conversationId);
+                    continue;
+                }
+                // 回源：重建 Redis 历史与元数据，再继续正常组装
+                logger.info("会话 {} 的 Redis 历史已过期，从 MySQL 兜底还原", conversationId);
+                ensureConversationMeta(userId, conversationId, mysqlHistory);
+                historyJson = redisTemplate.opsForValue().get(historyKey);
+                if (metaJson == null) {
+                    metaJson = redisTemplate.opsForValue().get(metaKey);
+                }
             }
 
             if (metaJson != null) {
@@ -359,10 +371,25 @@ public class ChatHandler {
         
         // 3. 设置当前会话为新选择的会话
         redisTemplate.opsForValue().set(currentKey, conversationId, Duration.ofDays(7));
-        
-        // 4. 返回该会话的历史消息
+
+        // 4. 返回该会话的历史消息。优先读 Redis，若 7 天过期缺失则从 MySQL 兜底还原，
+        //    并回写 Redis，保证后续继续聊天能读取到上下文。
         List<Map<String, String>> history = getConversationHistory(conversationId);
-        
+        if (history.isEmpty()) {
+            history = conversationService.getHistoryFromMysql(conversationId);
+            if (!history.isEmpty()) {
+                try {
+                    redisTemplate.opsForValue().set("conversation:" + conversationId,
+                            objectMapper.writeValueAsString(history), Duration.ofDays(7));
+                    logger.info("会话 {} 历史已从 MySQL 兜底还原并回写 Redis", conversationId);
+                } catch (Exception e) {
+                    logger.error("回写 Redis 失败（不影响返回）: {}", e.getMessage());
+                }
+                // 兜底还原时确保会话元数据/列表存在，避免侧边栏缺失
+                ensureConversationMeta(userId, conversationId, history);
+            }
+        }
+
         logger.info("用户 {} 切换到会话 {}，包含 {} 条消息", userId, conversationId, history.size());
         return history;
     }
@@ -489,6 +516,57 @@ public class ChatHandler {
         } catch (JsonProcessingException e) {
             logger.error("更新会话标题失败: {}", e.getMessage());
         }
+    }
+
+    /**
+     * 兜底还原会话的元数据与历史列表项。
+     * 当 Redis 中的会话历史/元数据因 7 天过期而缺失时，从 MySQL 还原后调用，
+     * 保证该会话在侧边栏可见、且标题/时间戳等元信息完整。
+     *
+     * @param userId 用户标识（实际为用户名）
+     * @param conversationId 会话 ID
+     * @param history 已从 MySQL 还原的消息列表（user/assistant 各一条/轮）
+     */
+    private void ensureConversationMeta(String userId, String conversationId, List<Map<String, String>> history) {
+        // 1. 确保会话历史在 Redis 中存在（防止后续继续聊天读不到上下文）
+        String historyKey = "conversation:" + conversationId;
+        if (redisTemplate.opsForValue().get(historyKey) == null) {
+            try {
+                redisTemplate.opsForValue().set(historyKey,
+                        objectMapper.writeValueAsString(history), Duration.ofDays(7));
+            } catch (Exception e) {
+                logger.error("兜底回写会话历史失败: {}", e.getMessage());
+            }
+        }
+
+        // 2. 确保元数据存在；不存在则用首条用户消息生成标题与创建时间
+        String metaKey = "conversation_meta:" + conversationId;
+        String metaJson = redisTemplate.opsForValue().get(metaKey);
+        if (metaJson == null) {
+            String now = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss"));
+            String title = "历史会话";
+            for (Map<String, String> msg : history) {
+                if ("user".equals(msg.get("role"))) {
+                    String content = msg.get("content");
+                    if (content != null && !content.isEmpty()) {
+                        title = content.length() > 20 ? content.substring(0, 20) + "..." : content;
+                    }
+                    break;
+                }
+            }
+            Map<String, Object> meta = new HashMap<>();
+            meta.put("title", title);
+            meta.put("createdAt", now);
+            meta.put("updatedAt", now);
+            try {
+                redisTemplate.opsForValue().set(metaKey, objectMapper.writeValueAsString(meta), Duration.ofDays(30));
+            } catch (JsonProcessingException e) {
+                logger.error("兜底还原会话元数据失败: {}", e.getMessage());
+            }
+        }
+
+        // 3. 确保会话在历史列表 ZSet 中可见
+        saveConversationToHistory(userId, conversationId);
     }
 
     private List<Map<String, String>> getConversationHistory(String conversationId) {
