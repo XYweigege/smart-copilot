@@ -65,7 +65,7 @@ function handleRegenerate() {
   }
   const userMsg = [...list.value].reverse().find(m => m.role === 'user');
   if (userMsg) {
-    chatStore.wsSend(userMsg.content);
+    chatStore.sendMessage(userMsg.content);
     list.value.push({ content: '', role: 'assistant', status: 'pending' });
   }
 }

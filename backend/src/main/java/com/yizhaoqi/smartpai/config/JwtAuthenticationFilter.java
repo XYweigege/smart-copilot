@@ -86,12 +86,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
 
     /**
-     * 从请求头中提取 JWT Token。
+     * 从请求中提取 JWT Token。
+     * 优先从 Authorization 头解析；对于无法自定义请求头的长连接（如 SSE 的 EventSource），
+     * 允许从 query 参数 token 回退提取。
      */
     private String extractToken(HttpServletRequest request) {
         String bearerToken = request.getHeader("Authorization");
         if (bearerToken != null && bearerToken.startsWith("Bearer ")) {
             return bearerToken.substring(7); // 去掉 "Bearer " 前缀
+        }
+        // SSE / EventSource 场景：token 走 query 参数
+        String queryToken = request.getParameter("token");
+        if (queryToken != null && !queryToken.isEmpty()) {
+            return queryToken;
         }
         return null;
     }

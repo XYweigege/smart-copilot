@@ -81,16 +81,32 @@ function processSourceLinks(text: string): string {
   return processedText;
 }
 
+function normalizeUserContent(rawContent: string): string {
+  if (!rawContent || rawContent.length < 2 || rawContent[0] !== '{') return rawContent;
+  try {
+    const parsed = JSON.parse(rawContent);
+    if (parsed && typeof parsed === 'object' && parsed.type === 'message' && typeof parsed.content === 'string') {
+      return parsed.content;
+    }
+  } catch {
+    // ignore parse errors
+  }
+  return rawContent;
+}
+
 const content = computed(() => {
   chatStore.scrollToBottom?.();
   const rawContent = props.msg.content ?? '';
 
+  // 兼容旧脏数据：之前 user 消息被存成了 JSON payload
+  const normalizedContent = props.msg.role === 'user' ? normalizeUserContent(rawContent) : rawContent;
+
   // 只对助手消息处理来源链接
   if (props.msg.role === 'assistant') {
-    return processSourceLinks(rawContent);
+    return processSourceLinks(normalizedContent);
   }
 
-  return rawContent;
+  return normalizedContent;
 });
 
 // 处理内容点击事件（事件委托）

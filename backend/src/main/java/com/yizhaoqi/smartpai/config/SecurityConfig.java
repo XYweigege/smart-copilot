@@ -45,8 +45,6 @@ public class SecurityConfig {
                     .authorizeHttpRequests(authorize -> authorize
                             // 允许静态资源访问
                             .requestMatchers("/", "/test.html", "/static/test.html", "/static/**", "/*.js", "/*.css", "/*.ico").permitAll()
-                            // 允许 WebSocket 连接
-                            .requestMatchers("/chat/**", "/ws/**").permitAll()
                             // 允许登录注册接口
                             .requestMatchers("/api/v1/users/register", "/api/v1/users/login").permitAll()
                             // 允许测试接口
@@ -59,8 +57,8 @@ public class SecurityConfig {
                             .requestMatchers("/api/search/**").hasAnyRole("USER", "ADMIN")
                             // 知识图谱接口 - 普通用户和管理员都可访问
                             .requestMatchers("/api/v1/knowledge-graph/**").hasAnyRole("USER", "ADMIN")
-                            // 聊天相关接口 - WebSocket停止Token获取 (允许匿名访问)
-                            .requestMatchers("/api/chat/websocket-token").permitAll()
+                            // 聊天 SSE 流式端点与停止端点 (鉴权走 Authorization header，放行由 JwtAuthenticationFilter 处理)
+                            .requestMatchers("/api/v1/chat/stream", "/api/v1/chat/stop").hasAnyRole("USER", "ADMIN")
                             // 聊天相关接口 - 会话管理 (需要登录)
                             .requestMatchers("/api/v1/chat/**").hasAnyRole("USER", "ADMIN")
                             // 管理员专属接口 - 知识库管理、系统状态、用户活动监控

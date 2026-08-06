@@ -5,6 +5,7 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.Disposable;
 import java.util.List;
 import java.util.Map;
 import java.util.ArrayList;
@@ -41,7 +42,7 @@ public class DeepSeekClient {
         this.aiProperties = aiProperties;
     }
     
-    public void streamResponse(String userMessage,
+    public Disposable streamResponse(String userMessage,
                              String context,
                              List<Map<String, String>> history,
                              Consumer<String> onChunk,
@@ -50,7 +51,7 @@ public class DeepSeekClient {
 
         Map<String, Object> request = buildRequest(userMessage, context, history);
 
-        webClient.post()
+        return webClient.post()
                 .uri("/chat/completions")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(request)

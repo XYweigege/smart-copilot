@@ -474,16 +474,14 @@ cd frontend; pnpm install; pnpm dev
 **Q5：AI 问答报错**
 → 多半是 `application.yml` 里 `deepseek.api.key` 没填真实 Key。
 
-**Q6：聊天为什么用 WebSocket 而不是 SSE？**
-→ 因为问答场景需要**双向通信**，而 SSE 只能服务器→客户端单向推送。具体三个原因：
+**Q6：聊天为什么用 SSE？**
+→ 问答场景虽然需要"停止生成"这样的客户端→服务器控制指令，但通过"一个 SSE 只读通道 + 一个普通 HTTP 停止接口"即可实现，且 SSE 更轻量、对代理/负载均衡更友好。具体设计：
 
-1. **需要主动"停止"生成**：前端在 AI 回复过程中，发送按钮会变成「停止」按钮（`frontend/src/views/chat/modules/input-box.vue`），通过 `wsSend({type:'stop', _internal_cmd_token})` 向服务器回传停止指令，后端 `ChatWebSocketHandler` 收到后调用 `chatHandler.stopResponse` 中断流式输出。SSE 是只读通道，要实现停止必须额外再开一个 HTTP 接口，而 WebSocket 一条连接就搞定收发。
-2. **同一通道收发问答**：用户提问（`processMessage`）和服务器流式推送（token 逐字返回）走的是同一个 `WebSocketSession`，连接天然支持双向。
-3. **连接即可携带鉴权与会话参数**：路由 `/chat/{token}` 把 JWT 放在路径里（`ChatWebSocketHandler.extractUserId`），连接时还能带 `?conversationId=xxx` 实现「继续聊天」切换会话。
+1. **流式响应走 SSE**：前端用 `EventSource` 连接 `GET /api/v1/chat/stream?message=...&token=...`，后端以 `text/event-stream` 逐字推送 token（`response_chunk`）与完成通知（`completion`）。`EventSource` 不支持自定义 header，鉴权 token 走 query 参数（与原 WebSocket 路径 token 一致）。
+2. **停止生成走独立 HTTP 接口**：前端点击「停止」按钮（`frontend/src/views/chat/modules/input-box.vue`）时，调用 `POST /api/v1/chat/stop`，后端通过 `Disposable.dispose()` 真正中断底层 LLM 流并关闭 SSE 连接。
+3. **会话上下文**：提问与推送通过 `conversationId` 关联；`ChatHandler` 以 `ChatOutput` 抽象解耦传输协议，SSE 由 `SseChatOutput` 实现。
 
-> 选择对照：如果只是一个纯「服务器推送、客户端不回传控制指令」的场景（通知、行情），SSE 更轻量。但本项目是带「中途打断」的流式对话，真正的全双工更合适。
->
-> 备注：当前生效的是 `ChatWebSocketHandler`（`/chat/{token}`），见 `WebSocketConfig`。`ChatController` 里有一段遗留的 `extends TextWebSocketHandler` 旧实现（用 session id 作 userId、无鉴权），未被注册，建议后续清理避免混淆。
+> 选择对照：SSE 适合"服务器主导推送、客户端少量控制指令"的流式对话；若需要高频双向信令，WebSocket 更合适。本项目已统一改为 SSE 方案（`ChatController` + `SseChatOutput` + `ChatHandler`）。
 
 ---
 

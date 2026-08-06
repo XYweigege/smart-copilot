@@ -1,10 +1,11 @@
-import { useWebSocket } from '@vueuse/core';
 import {
   fetchNewConversation,
   fetchConversations,
   fetchConversationList,
   switchConversation,
-  deleteConversation
+  deleteConversation,
+  fetchChatStream,
+  stopChat
 } from '@/service/api/chat';
 
 export const useChatStore = defineStore(SetupStoreId.Chat, () => {
@@ -20,31 +21,83 @@ export const useChatStore = defineStore(SetupStoreId.Chat, () => {
 
   const store = useAuthStore();
 
-  const sessionId = ref<string>(''); // WebSocket session ID
+  const sessionId = ref<string>(''); // 当前 SSE 会话标识
+  const connected = ref(false); // SSE 是否已连接
 
-  const {
-    status: wsStatus,
-    data: wsData,
-    send: wsSend,
-    open: wsOpen,
-    close: wsClose
-  } = useWebSocket(`/proxy-ws/chat/${store.token}`, {
-    autoReconnect: true
-  });
-
-  // 监听WebSocket消息，捕获sessionId
-  watch(wsData, (val) => {
-    if (!val) return;
-    try {
-      const data = JSON.parse(val);
-      if (data.type === 'connection' && data.sessionId) {
-        sessionId.value = data.sessionId;
-        console.log('WebSocket会话ID已更新:', sessionId.value);
+  /** 通过 SSE 发送聊天消息 */
+  function sendMessage(message: string) {
+    sessionId.value = '';
+    connected.value = true;
+    fetchChatStream(message, conversationId.value || undefined, {
+      onMeta: sid => {
+        sessionId.value = sid;
+      },
+      onMessage: data => handleStreamMessage(data),
+      onComplete: () => {
+        connected.value = false;
+      },
+      onError: () => {
+        connected.value = false;
       }
-    } catch (e) {
-      // Ignore JSON parse errors for non-JSON messages
+    });
+  }
+
+  /** 停止当前流式生成 */
+  async function stopMessage() {
+    await stopChat(sessionId.value);
+    connected.value = false;
+  }
+
+  /** 处理 SSE 推送的消息 */
+  function handleStreamMessage(data: any) {
+    if (!data || !data.type) return;
+    switch (data.type) {
+      case 'connection':
+        if (data.sessionId) sessionId.value = data.sessionId;
+        break;
+      case 'response_chunk':
+        appendAssistantChunk(data.content);
+        break;
+      case 'response_complete':
+        finalizeAssistantMessage();
+        if (data.conversationId) conversationId.value = data.conversationId;
+        break;
+      case 'conversation_id':
+        if (data.conversationId) conversationId.value = data.conversationId;
+        break;
+      case 'refuse':
+        addMessage('assistant', data.message);
+        break;
+      case 'error':
+        finalizeAssistantMessage();
+        if (data.message) addMessage('assistant', `[错误] ${data.message}`);
+        break;
+      default:
+        break;
     }
-  });
+  }
+
+  /** 当前正在生成中的助手消息索引（用于增量追加） */
+  let streamingIndex = -1;
+
+  function appendAssistantChunk(content: string) {
+    if (streamingIndex === -1) {
+      list.value.push({ role: 'assistant', content: '' });
+      streamingIndex = list.value.length - 1;
+    }
+    list.value[streamingIndex].content += content;
+    scrollToBottom.value?.();
+  }
+
+  function finalizeAssistantMessage() {
+    streamingIndex = -1;
+    scrollToBottom.value?.();
+  }
+
+  function addMessage(role: 'user' | 'assistant', content: string) {
+    list.value.push({ role, content });
+    scrollToBottom.value?.();
+  }
 
   /**
    * 新建会话 - 清空当前消息列表并创建新会话
@@ -163,12 +216,10 @@ export const useChatStore = defineStore(SetupStoreId.Chat, () => {
     list,
     conversationList,
     showHistorySidebar,
-    wsStatus,
-    wsData,
-    wsSend,
-    wsOpen,
-    wsClose,
+    connected,
     sessionId,
+    sendMessage,
+    stopMessage,
     scrollToBottom,
     newConversation,
     clearMessages,

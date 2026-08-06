@@ -33,7 +33,7 @@ public class KnowledgeGraphController {
     public ResponseEntity<Map<String, Object>> getStats() {
         logger.info("获取知识图谱统计信息");
         Map<String, Object> stats = knowledgeGraphService.getGraphStats();
-        return ResponseEntity.ok(stats);
+        return ResponseEntity.ok(Map.of("code", 200, "message", "ok", "data", stats));
     }
 
     /**
@@ -46,14 +46,18 @@ public class KnowledgeGraphController {
      * @return 相关文档列表
      */
     @GetMapping("/search")
-    public ResponseEntity<List<Map<String, Object>>> searchByRelation(
+    public ResponseEntity<Map<String, Object>> searchByRelation(
             @RequestParam String query,
             @RequestParam String userId,
             @RequestParam(required = false, defaultValue = "") String orgTag,
             @RequestParam(required = false, defaultValue = "10") int topK) {
         logger.info("知识图谱关系检索: query={}, userId={}, orgTag={}, topK={}", query, userId, orgTag, topK);
         List<Map<String, Object>> results = knowledgeGraphService.searchByRelation(query, userId, orgTag, topK);
-        return ResponseEntity.ok(results);
+        Map<String, Object> resp = new HashMap<>();
+        resp.put("code", 200);
+        resp.put("message", "ok");
+        resp.put("data", results);
+        return ResponseEntity.ok(resp);
     }
 
     /**
@@ -70,7 +74,7 @@ public class KnowledgeGraphController {
         result.put("success", true);
         result.put("message", "文档图谱已删除");
         result.put("fileMd5", fileMd5);
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(Map.of("code", 200, "message", "ok", "data", result));
     }
 
     /**
@@ -92,6 +96,6 @@ public class KnowledgeGraphController {
         result.put("success", true);
         result.put("message", "图谱构建完成");
         result.put("fileMd5", fileMd5);
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(Map.of("code", 200, "message", "ok", "data", result));
     }
 }

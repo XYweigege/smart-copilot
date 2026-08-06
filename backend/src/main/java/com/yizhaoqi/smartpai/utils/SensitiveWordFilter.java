@@ -17,7 +17,7 @@ import java.util.*;
  * 2. 命中检测（contains）、命中词提取（findWords）
  * 3. 支持忽略大小写、忽略常见绕过字符（空格、*、全角等）
  */
-@Component
+@Component("sensitiveWordFilterUtil")
 public class SensitiveWordFilter {
 
     private static final Logger logger = LoggerFactory.getLogger(SensitiveWordFilter.class);

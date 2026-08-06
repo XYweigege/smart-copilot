@@ -1,245 +1,192 @@
 package com.yizhaoqi.smartpai.controller;
 
-import com.yizhaoqi.smartpai.handler.ChatWebSocketHandler;
-import com.yizhaoqi.smartpai.config.SensitiveWordConfig;
-import com.yizhaoqi.smartpai.config.SensitiveWordFilter;
 import com.yizhaoqi.smartpai.service.ChatHandler;
-import com.yizhaoqi.smartpai.utils.LogUtils;
-import org.springframework.beans.factory.annotation.Autowired;
+import com.yizhaoqi.smartpai.service.ChatOutput;
+import com.yizhaoqi.smartpai.service.SseChatOutput;
+import com.yizhaoqi.smartpai.utils.JwtUtils;
+import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.stereotype.Component;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.socket.TextMessage;
-import org.springframework.web.socket.WebSocketSession;
-import org.springframework.web.socket.handler.TextWebSocketHandler;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
-@Component
 @RestController
 @RequestMapping("/api/v1/chat")
-public class ChatController extends TextWebSocketHandler {
+public class ChatController {
+
+    private static final Logger logger = LoggerFactory.getLogger(ChatController.class);
 
     private final ChatHandler chatHandler;
+    private final JwtUtils jwtUtils;
 
-    @Autowired
-    private SensitiveWordFilter sensitiveWordFilter;
+    // 会话Id -> SSE 输出通道，便于"继续聊天"与状态查询
+    private final ConcurrentHashMap<String, SseChatOutput> sseSessions = new ConcurrentHashMap<>();
 
-    @Autowired
-    private SensitiveWordConfig sensitiveWordConfig;
-
-    public ChatController(ChatHandler chatHandler) {
+    public ChatController(ChatHandler chatHandler, JwtUtils jwtUtils) {
         this.chatHandler = chatHandler;
+        this.jwtUtils = jwtUtils;
     }
 
-    @Override
-    protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
-        String userMessage = message.getPayload();
-        String userId = session.getId(); // Use session ID as userId for simplicity
-
-        LogUtils.PerformanceMonitor monitor = LogUtils.startPerformanceMonitor("WEBSOCKET_CHAT");
-        try {
-            LogUtils.logChat(userId, session.getId(), "USER_MESSAGE", userMessage.length());
-            LogUtils.logBusiness("WEBSOCKET_CHAT", userId, "处理WebSocket聊天消息: messageLength=%d", userMessage.length());
-
-            // 敏感词拦截：命中则记录审计并拒绝，不转发给大模型
-            if (sensitiveWordFilter != null && sensitiveWordFilter.contains(userMessage)) {
-                Set<String> hits = sensitiveWordFilter.findAll(userMessage);
-                String audit = String.format(
-                        "敏感词拦截(WebSocket): 用户=%s 命中词=%s IP=%s",
-                        userId, hits, session.getRemoteAddress());
-                if (sensitiveWordConfig.isAuditLog()) {
-                    LogUtils.logAudit("SENSITIVE_WORD_BLOCKED", audit);
-                } else {
-                    LogUtils.logBusiness("SENSITIVE_WORD_BLOCKED", userId, audit);
-                }
-                chatHandler.sendRefuseMessage(session,
-                        sensitiveWordConfig.getRejectMessage() + "（命中敏感词：" + String.join("、", hits) + "）");
-                LogUtils.logUserOperation(userId, "WEBSOCKET_CHAT", "sensitive_blocked", "BLOCKED");
-                monitor.end("WebSocket消息被敏感词拦截");
-                return;
-            }
-
-            chatHandler.processMessage(userId, userMessage, session);
-
-            LogUtils.logUserOperation(userId, "WEBSOCKET_CHAT", "message_processing", "SUCCESS");
-            monitor.end("WebSocket消息处理成功");
-        } catch (Exception e) {
-            LogUtils.logBusinessError("WEBSOCKET_CHAT", userId, "WebSocket消息处理失败", e);
-            monitor.end("WebSocket消息处理失败: " + e.getMessage());
-            throw e;
-        }
-    }
-    
     /**
-     * 获取WebSocket停止指令Token
+     * SSE 聊天流式端点。
+     * 前端通过 EventSource 连接；鉴权走 Authorization header（Bearer token）。
      */
-    @GetMapping("/websocket-token")
-    public ResponseEntity<?> getWebSocketToken() {
+    @GetMapping(value = "/stream", produces = "text/event-stream;charset=UTF-8")
+    public SseEmitter streamChat(@RequestParam("message") String message,
+                                 @RequestParam(value = "conversationId", required = false) String conversationId,
+                                 @RequestParam(value = "token", required = false) String token,
+                                 HttpServletRequest request) {
+
+        // EventSource 不支持自定义 header，鉴权走 token 查询参数
+        String userId = resolveUserId(token, request);
+        String clientIp = request.getRemoteAddr();
+        String sessionId = java.util.UUID.randomUUID().toString();
+
+        SseEmitter emitter = new SseEmitter(0L); // 0 = 不超时，由 nginx/客户端管理
+        SseChatOutput output = new SseChatOutput(emitter, sessionId, clientIp);
+        sseSessions.put(sessionId, output);
+
+        emitter.onCompletion(() -> sseSessions.remove(sessionId));
+        emitter.onTimeout(() -> {
+            emitter.complete();
+            sseSessions.remove(sessionId);
+        });
+        emitter.onError((e) -> sseSessions.remove(sessionId));
+
+        // 先下发 meta 事件，告知前端本次会话标识
         try {
-            String cmdToken = ChatWebSocketHandler.getInternalCmdToken();
-            
-            // 检查token是否有效
-            if (cmdToken == null || cmdToken.trim().isEmpty()) {
-                return ResponseEntity.status(500).body(Map.of(
-                    "code", 500,
-                    "message", "Token生成失败",
-                    "data", null
-                ));
-            }
-            
-            return ResponseEntity.ok(Map.of(
-                "code", 200,
-                "message", "获取WebSocket停止指令Token成功",
-                "data", Map.of("cmdToken", cmdToken)
-            ));
-            
+            emitter.send(SseEmitter.event()
+                    .name("meta")
+                    .data("{\"type\":\"connection\",\"sessionId\":\"" + sessionId + "\"}")
+                    .id(sessionId));
         } catch (Exception e) {
-            LogUtils.logBusinessError("GET_WEBSOCKET_TOKEN", "system", "获取WebSocket Token失败", e);
-            return ResponseEntity.status(500).body(Map.of(
-                "code", 500,
-                "message", "服务器内部错误：" + e.getMessage(),
-                "data", null
-            ));
+            logger.warn("下发 SSE meta 事件失败: {}", e.getMessage());
         }
+
+        logger.info("SSE 聊天连接建立，用户ID: {}，会话ID: {}，IP: {}", userId, sessionId, clientIp);
+        chatHandler.processMessage(userId, message, output);
+
+        return emitter;
     }
 
     /**
-     * 新建会话 - 清除当前会话，创建新会话ID
-     * 用于减少 token 消耗，避免历史对话过长
+     * 停止当前用户的响应生成。
+     */
+    @PostMapping("/stop")
+    public ResponseEntity<?> stopChat(@RequestHeader(value = "Authorization", required = false) String authorization,
+                                      @RequestBody(required = false) Map<String, String> body,
+                                      HttpServletRequest request) {
+        String userId = resolveUserId(authorization, request);
+        String sessionId = body != null ? body.get("sessionId") : null;
+        logger.info("收到停止请求，用户ID: {}，会话ID: {}", userId, sessionId);
+
+        if (sessionId != null && !sessionId.isEmpty()) {
+            SseChatOutput output = sseSessions.get(sessionId);
+            if (output != null) {
+                output.markStopped();
+                output.complete(); // 关闭 SSE 通道，前端 onComplete 触发
+            }
+        }
+        chatHandler.stopResponse(userId, sessionId);
+
+        return ResponseEntity.ok(Map.of("code", 200, "message", "ok",
+                "data", Map.of("status", "stopped", "sessionId", sessionId != null ? sessionId : "")));
+    }
+
+    /**
+     * 新建会话：清除当前会话上下文，返回新的 conversationId。
      */
     @PostMapping("/new-conversation")
-    public ResponseEntity<?> newConversation() {
-        try {
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            String userId = auth.getName();
-            
-            String newConversationId = chatHandler.createNewConversation(userId);
-            
-            LogUtils.logUserOperation(userId, "NEW_CONVERSATION", "create_new_conversation", "SUCCESS");
-            
-            return ResponseEntity.ok(Map.of(
-                "code", 200,
-                "message", "新会话创建成功",
-                "data", Map.of("conversationId", newConversationId)
-            ));
-            
-        } catch (Exception e) {
-            LogUtils.logBusinessError("NEW_CONVERSATION", "system", "新建会话失败", e);
-            return ResponseEntity.status(500).body(Map.of(
-                "code", 500,
-                "message", "新建会话失败：" + e.getMessage(),
-                "data", null
-            ));
-        }
+    public ResponseEntity<?> newConversation(@RequestHeader(value = "Authorization", required = false) String authorization,
+                                             HttpServletRequest request) {
+        String userId = resolveUserId(authorization, request);
+        String conversationId = chatHandler.createNewConversation(userId);
+        return ResponseEntity.ok(Map.of("code", 200, "message", "ok", "data", Map.of("conversationId", conversationId)));
     }
 
     /**
-     * 获取历史会话列表
+     * 获取当前用户的历史会话列表。
      */
     @GetMapping("/conversations")
-    public ResponseEntity<?> getConversations() {
-        try {
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            String userId = auth.getName();
-            
-            List<Map<String, Object>> conversations = chatHandler.getConversationHistoryList(userId);
-            
-            return ResponseEntity.ok(Map.of(
-                "code", 200,
-                "message", "获取历史会话列表成功",
-                "data", conversations
-            ));
-            
-        } catch (Exception e) {
-            LogUtils.logBusinessError("GET_CONVERSATIONS", "system", "获取历史会话列表失败", e);
-            return ResponseEntity.status(500).body(Map.of(
-                "code", 500,
-                "message", "获取历史会话列表失败：" + e.getMessage(),
-                "data", null
-            ));
-        }
+    public ResponseEntity<?> conversationList(@RequestHeader(value = "Authorization", required = false) String authorization,
+                                              HttpServletRequest request) {
+        String userId = resolveUserId(authorization, request);
+        return ResponseEntity.ok(Map.of("code", 200, "message", "ok", "data", chatHandler.getConversationHistoryList(userId)));
     }
 
     /**
-     * 切换到指定的历史会话
+     * 切换到指定历史会话并返回其消息。
      */
     @PostMapping("/switch-conversation")
-    public ResponseEntity<?> switchConversation(@org.springframework.web.bind.annotation.RequestBody Map<String, String> body) {
-        try {
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            String userId = auth.getName();
-            String conversationId = body.get("conversationId");
-            
-            if (conversationId == null || conversationId.isEmpty()) {
-                return ResponseEntity.badRequest().body(Map.of(
-                    "code", 400,
-                    "message", "conversationId 不能为空",
-                    "data", null
-                ));
-            }
-            
-            List<Map<String, String>> history = chatHandler.switchToConversation(userId, conversationId);
-            
-            return ResponseEntity.ok(Map.of(
-                "code", 200,
-                "message", "切换会话成功",
-                "data", Map.of(
-                    "conversationId", conversationId,
-                    "messages", history
-                )
-            ));
-            
-        } catch (Exception e) {
-            LogUtils.logBusinessError("SWITCH_CONVERSATION", "system", "切换会话失败", e);
-            return ResponseEntity.status(500).body(Map.of(
-                "code", 500,
-                "message", "切换会话失败：" + e.getMessage(),
-                "data", null
-            ));
-        }
+    public ResponseEntity<?> switchConversation(@RequestHeader(value = "Authorization", required = false) String authorization,
+                                                @RequestBody Map<String, String> body,
+                                                HttpServletRequest request) {
+        String userId = resolveUserId(authorization, request);
+        String conversationId = body != null ? body.get("conversationId") : null;
+        List<Map<String, String>> messages = chatHandler.switchToConversation(userId, conversationId);
+        return ResponseEntity.ok(Map.of("code", 200, "message", "ok",
+                "data", Map.of("conversationId", conversationId, "messages", messages)));
     }
 
     /**
-     * 删除指定的历史会话
+     * 删除指定历史会话。
      */
     @PostMapping("/delete-conversation")
-    public ResponseEntity<?> deleteConversation(@org.springframework.web.bind.annotation.RequestBody Map<String, String> body) {
-        try {
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            String userId = auth.getName();
-            String conversationId = body.get("conversationId");
-            
-            if (conversationId == null || conversationId.isEmpty()) {
-                return ResponseEntity.badRequest().body(Map.of(
-                    "code", 400,
-                    "message", "conversationId 不能为空",
-                    "data", null
-                ));
-            }
-            
-            chatHandler.deleteConversation(userId, conversationId);
-            
-            return ResponseEntity.ok(Map.of(
-                "code", 200,
-                "message", "删除会话成功",
-                "data", null
-            ));
-            
-        } catch (Exception e) {
-            LogUtils.logBusinessError("DELETE_CONVERSATION", "system", "删除会话失败", e);
-            return ResponseEntity.status(500).body(Map.of(
-                "code", 500,
-                "message", "删除会话失败：" + e.getMessage(),
-                "data", null
-            ));
+    public ResponseEntity<?> deleteConversation(@RequestHeader(value = "Authorization", required = false) String authorization,
+                                                @RequestBody Map<String, String> body,
+                                                HttpServletRequest request) {
+        String userId = resolveUserId(authorization, request);
+        String conversationId = body != null ? body.get("conversationId") : null;
+        chatHandler.deleteConversation(userId, conversationId);
+        return ResponseEntity.ok(Map.of("code", 200, "message", "ok",
+                "data", Map.of("status", "deleted", "conversationId", conversationId)));
+    }
+
+    /**
+     * 根据会话内的引用编号查询对应的文件 MD5（用于文档溯源）。
+     */
+    @GetMapping("/reference")
+    public ResponseEntity<?> reference(@RequestHeader(value = "Authorization", required = false) String authorization,
+                                       @RequestParam("sessionId") String sessionId,
+                                       @RequestParam("referenceNumber") int referenceNumber,
+                                       HttpServletRequest request) {
+        resolveUserId(authorization, request);
+        String fileMd5 = chatHandler.getReferenceMd5(sessionId, referenceNumber);
+        if (fileMd5 == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("code", 404, "message", "未找到引用映射"));
         }
+        return ResponseEntity.ok(Map.of("code", 200, "message", "ok", "data", Map.of("fileMd5", fileMd5)));
+    }
+
+    private String resolveUserId(String tokenParam, HttpServletRequest request) {
+        if (tokenParam != null && !tokenParam.isEmpty()) {
+            String token = tokenParam;
+            if (token.toLowerCase().startsWith("bearer ")) {
+                token = token.substring(7).trim();
+            }
+            String username = jwtUtils.extractUsernameFromToken(token);
+            if (username != null) {
+                return username;
+            }
+        }
+        // 回退：尝试从 SecurityContext 取
+        try {
+            org.springframework.security.core.Authentication auth =
+                    org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+            if (auth != null && auth.getName() != null && !"anonymousUser".equals(auth.getName())) {
+                return auth.getName();
+            }
+        } catch (Exception ignored) {}
+        // 最后一重回退（不应发生，前端必带 token）
+        String ip = request.getRemoteAddr();
+        logger.warn("无法解析用户身份，使用 IP 作为匿名标识: {}", ip);
+        return "anon_" + ip;
     }
 }

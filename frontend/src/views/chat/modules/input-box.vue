@@ -1,6 +1,6 @@
 <script setup lang="ts">
 const chatStore = useChatStore();
-const { input, list, wsStatus, wsData } = storeToRefs(chatStore);
+const { input, list, connected } = storeToRefs(chatStore);
 
 const latestMessage = computed(() => {
   return list.value[list.value.length - 1] ?? {};
@@ -12,54 +12,31 @@ const isSending = computed(() => {
   );
 });
 
-const sendable = computed(
-  () => (!input.value.message && !isSending) || ['CLOSED', 'CONNECTING'].includes(wsStatus.value)
-);
-
-watch(wsData, val => {
-  const data = JSON.parse(val);
-
-  // 后端回传当前会话ID，保持前后端会话状态同步
-  if (data.type === 'conversation' && data.conversationId) {
-    chatStore.conversationId = data.conversationId;
-    return;
-  }
-
-  const assistant = list.value[list.value.length - 1];
-
-  if (data.type === 'completion' && data.status === 'finished' && assistant.status !== 'error')
-    assistant.status = 'finished';
-  if (data.error) assistant.status = 'error';
-  else if (data.chunk) {
-    assistant.status = 'loading';
-    assistant.content += data.chunk;
-  }
-});
+const sendable = computed(() => !input.value.message && !isSending);
 
 const handleSend = async () => {
-  //  判断是否正在发送, 如果发送中，则停止ai继续响应
+  // 正在生成时点击 = 停止
   if (isSending.value) {
-    const { error, data } = await request<Api.Chat.Token>({ url: 'chat/websocket-token', baseURL: 'proxy-api' });
-    if (error) return;
-
-    chatStore.wsSend(JSON.stringify({ type: 'stop', _internal_cmd_token: data.cmdToken }));
-
+    await chatStore.stopMessage();
     list.value[list.value.length - 1].status = 'finished';
     if (!latestMessage.value.content) list.value.pop();
     return;
   }
 
+  if (!input.value.message) return;
+
   list.value.push({
     content: input.value.message,
     role: 'user'
   });
-  chatStore.wsSend(input.value.message);
+  const message = input.value.message;
   list.value.push({
     content: '',
     role: 'assistant',
     status: 'pending'
   });
   input.value.message = '';
+  chatStore.sendMessage(message);
   nextTick(() => inputRef.value?.focus());
 };
 
@@ -110,19 +87,18 @@ const handShortcut = (e: KeyboardEvent) => {
     />
     <div class="flex items-center justify-between pt-2">
       <div class="flex items-center gap-3">
-        <!-- 连接状态徽标 -->
+        <!-- SSE 连接状态徽标 -->
         <NTag
           round
           size="small"
           :bordered="false"
-          :type="wsStatus === 'OPEN' ? 'success' : wsStatus === 'CONNECTING' ? 'warning' : 'error'"
+          :type="connected ? 'success' : 'default'"
         >
           <template #icon>
-            <icon-eos-icons:loading v-if="wsStatus === 'CONNECTING'" />
-            <icon-fluent:plug-connected-checkmark-20-filled v-else-if="wsStatus === 'OPEN'" />
+            <icon-fluent:plug-connected-checkmark-20-filled v-if="connected" />
             <icon-tabler:plug-connected-x v-else />
           </template>
-          {{ wsStatus === 'OPEN' ? '已连接' : wsStatus === 'CONNECTING' ? '连接中' : '已断开' }}
+          {{ connected ? '已连接' : '未连接' }}
         </NTag>
         <NButton
           v-if="input.message"
